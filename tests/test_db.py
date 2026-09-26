@@ -1,3 +1,9 @@
+import sqlite3
+import struct
+
+import pytest
+
+
 def test_db_initializes_all_required_tables(tmp_db_path):
     from db.connect import connect
     from db.init_db import init_db
@@ -50,3 +56,35 @@ def test_init_db_is_idempotent(tmp_db_path):
 
     init_db(tmp_db_path)
     init_db(tmp_db_path)  # must not raise
+
+
+def test_sqlite_vec_is_available_on_subsequent_connections(tmp_db_path):
+    sqlite_vec = pytest.importorskip("sqlite_vec")
+    probe = sqlite3.connect(":memory:")
+    if not hasattr(probe, "enable_load_extension"):
+        probe.close()
+        pytest.skip("SQLite loadable extensions are unavailable")
+    try:
+        probe.enable_load_extension(True)
+        sqlite_vec.load(probe)
+    except sqlite3.Error:
+        pytest.skip("sqlite-vec cannot load in this environment")
+    finally:
+        probe.close()
+
+    from config import get_config
+    from db.connect import connect
+    from db.init_db import init_db
+
+    init_db(tmp_db_path)
+    conn = connect(tmp_db_path)
+    try:
+        dimension = get_config().embedding_dimension
+        embedding = struct.pack(f"<{dimension}f", *([0.0] * dimension))
+        conn.execute(
+            "INSERT INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)",
+            (1, embedding),
+        )
+        assert conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0] == 1
+    finally:
+        conn.close()
