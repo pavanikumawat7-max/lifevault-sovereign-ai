@@ -36,4 +36,26 @@ def connect(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    _load_sqlite_vec(conn)
     return conn
+
+
+def _load_sqlite_vec(conn: sqlite3.Connection) -> bool:
+    """Register vec0 on this connection when the optional extension is usable."""
+    enable_extensions = getattr(conn, "enable_load_extension", None)
+    if enable_extensions is None:
+        return False
+    try:
+        enable_extensions(True)
+        try:
+            try:
+                import sqlite_vec
+            except ImportError:
+                conn.load_extension("vec0")
+            else:
+                sqlite_vec.load(conn)
+        finally:
+            enable_extensions(False)
+        return True
+    except (AttributeError, sqlite3.Error):
+        return False
