@@ -1,14 +1,4 @@
-"""Worker interface: scan / parse / index.
-
-S1 defines the CONTRACT only -- method names, signatures, and result
-shapes -- so later sessions can implement real filesystem scanning, PDF
-parsing/chunking, and FTS5/vector indexing without changing how the rest
-of the system (the graph, the API, run.py) calls into the worker.
-
-Every method deliberately raises NotImplementedError in S1. Do not add
-real scanning/parsing/indexing logic here yet -- that's explicitly out of
-scope for S1 (see the project brief's scope rule).
-"""
+"""Stable Worker contract backed by the S2 ingestion implementation."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -45,21 +35,22 @@ class IndexResult:
 
 
 class Worker:
-    """S1 interface only. Real behavior lands in a later session.
-
-    Intended lifecycle (for later sessions to implement):
-        scan(root_path)   -> discover files under an index_root, dedupe
-                              by content hash, record file_locations
-        parse(content_hash) -> extract text and split it into `chunks` rows
-        index(content_hash) -> populate chunks_fts and chunks_vec for the
-                                document's chunks
-    """
+    def __init__(self, db_path: str | None = None):
+        self.db_path = db_path
 
     def scan(self, root_path: str) -> ScanResult:
-        raise NotImplementedError("Worker.scan is a S1 interface stub")
+        from worker.index import approve_root
+        from worker.scanner import scan_root
+
+        root_id = approve_root(root_path, db_path=self.db_path)
+        return scan_root(root_id, self.db_path).result
 
     def parse(self, content_hash: str) -> ParseResult:
-        raise NotImplementedError("Worker.parse is a S1 interface stub")
+        from worker.index import parse_document
+
+        return parse_document(content_hash, self.db_path)
 
     def index(self, content_hash: str) -> IndexResult:
-        raise NotImplementedError("Worker.index is a S1 interface stub")
+        from worker.index import index_document
+
+        return index_document(content_hash, self.db_path)
