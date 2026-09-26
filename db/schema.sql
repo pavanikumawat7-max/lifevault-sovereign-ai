@@ -51,11 +51,30 @@ CREATE TABLE IF NOT EXISTS file_locations (
     content_hash        TEXT NOT NULL REFERENCES documents(content_hash) ON DELETE CASCADE,
     root_id              INTEGER REFERENCES index_roots(id) ON DELETE SET NULL,
     path                  TEXT NOT NULL,
+    size_bytes            INTEGER,                     -- S2 cheap-change prefilter
+    mtime_ns              INTEGER,                     -- nanosecond file mtime
     missing               INTEGER NOT NULL DEFAULT 0,   -- 0/1, set when the path no longer resolves
     last_verified_at      TEXT,
     created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     UNIQUE(content_hash, path)
 );
+
+-- ---------------------------------------------------------------------
+-- index_state: singleton persisted worker status used by /api/index/status
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS index_state (
+    id                  INTEGER PRIMARY KEY CHECK (id = 1),
+    state               TEXT NOT NULL DEFAULT 'idle',
+    files_found         INTEGER NOT NULL DEFAULT 0,
+    files_unique        INTEGER NOT NULL DEFAULT 0,
+    files_duplicates    INTEGER NOT NULL DEFAULT 0,
+    files_skipped       INTEGER NOT NULL DEFAULT 0,
+    files_processed     INTEGER NOT NULL DEFAULT 0,
+    last_run_at         TEXT,
+    message             TEXT
+);
+
+INSERT OR IGNORE INTO index_state (id) VALUES (1);
 
 -- ---------------------------------------------------------------------
 -- chunks: retrieval units belonging to a document
@@ -155,6 +174,7 @@ END;
 -- ---------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_file_locations_content_hash ON file_locations(content_hash);
 CREATE INDEX IF NOT EXISTS idx_file_locations_root_id ON file_locations(root_id);
+CREATE INDEX IF NOT EXISTS idx_file_locations_path ON file_locations(path);
 CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE INDEX IF NOT EXISTS idx_facts_source_document_hash ON facts(source_document_hash);
 CREATE INDEX IF NOT EXISTS idx_facts_type_field ON facts(type, field);

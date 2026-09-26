@@ -263,6 +263,20 @@ these:
 - **Retrieval & answering** (`graph/nodes.py: retrieve`, `answer`,
   `verify_grounding`): real FTS5/vector search, real `llm.chat()` calls,
   real citation/grounding checks.
+
+## S2 ingestion usage
+
+Generate the synthetic corpus, then approve and index any folder:
+
+```bash
+python scripts/generate_demo_corpus.py
+python scripts/index_folder.py demo-data/synthetic
+```
+
+The CLI prints found, unique, duplicate, skipped, processed, chunk, and
+vector-availability counts. It writes documents, locations, page-aware
+chunks, FTS5 rows, and—when `sqlite-vec` is available—`chunks_vec` rows to
+the configured `LIFEVAULT_DB_PATH`.
 - **Proposals & policy** (`graph/nodes.py: propose_action`, `policy_check`;
   `tools/registry.py`; `policy/policy.py`): real tool registrations, real
   `PolicyRule`s, real proposal generation written to the `proposals` table.

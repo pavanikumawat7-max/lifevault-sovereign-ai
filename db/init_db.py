@@ -31,9 +31,21 @@ def init_db(db_path: Optional[str] = None) -> None:
     try:
         schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
         conn.executescript(schema_sql)
+        _apply_s2_migrations(conn)
         _init_vector_table(conn, cfg.embedding_dimension)
     finally:
         conn.close()
+
+
+def _apply_s2_migrations(conn: sqlite3.Connection) -> None:
+    """Add S2 prefilter columns to databases created from the frozen S1 schema."""
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(file_locations)")
+    }
+    if "size_bytes" not in columns:
+        conn.execute("ALTER TABLE file_locations ADD COLUMN size_bytes INTEGER")
+    if "mtime_ns" not in columns:
+        conn.execute("ALTER TABLE file_locations ADD COLUMN mtime_ns INTEGER")
 
 
 def _init_vector_table(conn: sqlite3.Connection, dimension: int) -> None:
@@ -46,11 +58,20 @@ def _init_vector_table(conn: sqlite3.Connection, dimension: int) -> None:
     (it's idempotent) once the extension is confirmed available.
     """
     try:
-        conn.enable_load_extension(True)
         try:
-            conn.load_extension("vec0")
-        finally:
-            conn.enable_load_extension(False)
+            import sqlite_vec
+
+            conn.enable_load_extension(True)
+            try:
+                sqlite_vec.load(conn)
+            finally:
+                conn.enable_load_extension(False)
+        except ImportError:
+            conn.enable_load_extension(True)
+            try:
+                conn.load_extension("vec0")
+            finally:
+                conn.enable_load_extension(False)
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0("
             "chunk_id INTEGER PRIMARY KEY, "
