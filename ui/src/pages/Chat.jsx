@@ -1,23 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sendChatMessage } from "../api/client.js";
-import CitationViewer from "../components/CitationViewer.jsx";
 
-function CitationChip({ citation, onOpen }) {
-  const filename = citation.path ? citation.path.split("/").pop() : "source";
-  const pageSuffix = citation.page ? ` p.${citation.page}` : "";
-  return (
-    <button
-      type="button"
-      className="citation-chip"
-      onClick={() => onOpen(citation)}
-      title={citation.path || citation.document_hash}
-    >
-      {citation.label ? `${citation.label}: ` : ""}
-      {filename}
-      {pageSuffix}
-    </button>
-  );
-}
+const SUGGESTIONS = [
+  "What documents have been indexed so far?",
+  "Summarize the most recent document.",
+  "What can LifeVault do once retrieval is live?",
+];
 
 export default function Chat() {
   const [conversationId, setConversationId] = useState(null);
@@ -25,13 +13,15 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
-  const [activeCitation, setActiveCitation] = useState(null);
+  const logRef = useRef(null);
 
-  async function handleSend(e) {
-    e.preventDefault();
-    const message = input.trim();
-    if (!message) return;
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [history, sending]);
 
+  async function sendMessage(message) {
     setSending(true);
     setError(null);
     const nextHistory = [...history, { role: "user", content: message }];
@@ -41,17 +31,7 @@ export default function Chat() {
     try {
       const resp = await sendChatMessage(message, conversationId, history);
       setConversationId(resp.conversation_id);
-      setHistory([
-        ...nextHistory,
-        {
-          role: "assistant",
-          content: resp.answer,
-          citations: resp.citations || [],
-          grounded: resp.grounded,
-          confidence: resp.confidence,
-          verificationReason: resp.verification_reason,
-        },
-      ]);
+      setHistory([...nextHistory, { role: "assistant", content: resp.answer }]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -59,53 +39,176 @@ export default function Chat() {
     }
   }
 
+  function handleSend(e) {
+    e.preventDefault();
+    const message = input.trim();
+    if (!message) return;
+    sendMessage(message);
+  }
+
+  function handleSuggestion(text) {
+    if (sending) return;
+    sendMessage(text);
+  }
+
+  const userTurns = history.filter((m) => m.role === "user").length;
+
   return (
-    <section>
-      <h2>Chat</h2>
-      <p className="hint">
-        Ask a question about your indexed documents. Answers are grounded in
-        retrieved chunks; click a citation chip to preview the source.
-      </p>
+    <section className="chat-page">
+      <header className="chat-page-header">
+        <div>
+          <h2>Chat</h2>
+          <p className="hint">
+            S1 stub: answers come from <code>llm.chat()</code> in fixture mode — no retrieval,
+            grounding, or citations yet.
+          </p>
+        </div>
+      </header>
 
-      {error && <p className="error">Error: {error}</p>}
-
-      <div className="chat-log">
-        {history.length === 0 && <p className="hint">Ask something to get started.</p>}
-        {history.map((m, i) => (
-          <div key={i} className={`chat-message chat-${m.role}`}>
-            <strong>{m.role === "user" ? "You" : "LifeVault"}:</strong> {m.content}
-            {m.role === "assistant" && m.grounded === false && (
-              <span className="badge badge-warn" title={m.verificationReason || ""}>
-                unverified
-              </span>
-            )}
-            {m.role === "assistant" && m.citations && m.citations.length > 0 && (
-              <div className="citation-row">
-                {m.citations.map((c, ci) => (
-                  <CitationChip key={ci} citation={c} onOpen={setActiveCitation} />
+      <div className="chat-grid">
+        <div className="chat-panel">
+          <div className="chat-log" ref={logRef}>
+            {history.length === 0 ? (
+              <div className="chat-empty">
+                <div className="chat-empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a8.5 8.5 0 0 1-8.5 8.5c-1.3 0-2.53-.3-3.62-.83L3 21l1.4-4.2A8.4 8.4 0 0 1 3.5 12 8.5 8.5 0 0 1 12 3.5 8.5 8.5 0 0 1 21 12Z" />
+                  </svg>
+                </div>
+                <p className="chat-empty-title">Ask LifeVault something</p>
+                <p className="chat-empty-subtitle">
+                  Questions are answered from the fixture LLM for now — try a quick test message
+                  or one of the prompts on the right.
+                </p>
+              </div>
+            ) : (
+              <div className="chat-messages">
+                {history.map((m, i) => (
+                  <div key={i} className={`chat-bubble-row chat-bubble-row--${m.role}`}>
+                    <div className="chat-avatar" aria-hidden="true">
+                      {m.role === "user" ? "U" : "LV"}
+                    </div>
+                    <div className="chat-bubble">
+                      <span className="chat-bubble-label">
+                        {m.role === "user" ? "You" : "LifeVault"}
+                      </span>
+                      <p className="chat-bubble-text">{m.content}</p>
+                    </div>
+                  </div>
                 ))}
+                {sending && (
+                  <div className="chat-bubble-row chat-bubble-row--assistant">
+                    <div className="chat-avatar" aria-hidden="true">LV</div>
+                    <div className="chat-bubble">
+                      <span className="chat-bubble-label">LifeVault</span>
+                      <p className="chat-typing">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+
+          {error && <p className="error chat-error">Error: {error}</p>}
+
+          <form className="composer" onSubmit={handleSend}>
+            <input
+              type="text"
+              className="composer-input"
+              placeholder="Ask a question..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={sending}
+            />
+            <button type="submit" className="composer-send" disabled={sending || !input.trim()}>
+              {sending ? (
+                "Sending…"
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 12h16M13 5l7 7-7 7" />
+                  </svg>
+                  <span>Send</span>
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+
+        <aside className="chat-side">
+          <div className="side-card">
+            <div className="side-card-title">
+              <span className="side-icon side-icon--teal" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M12 7.5V12l3 2" />
+                </svg>
+              </span>
+              Session
+            </div>
+            <dl className="side-stats">
+              <div className="side-stat">
+                <dt>Status</dt>
+                <dd>
+                  <span className="pill pill--teal">Fixture mode</span>
+                </dd>
+              </div>
+              <div className="side-stat">
+                <dt>Conversation</dt>
+                <dd className="mono">{conversationId ?? "not started"}</dd>
+              </div>
+              <div className="side-stat">
+                <dt>Messages sent</dt>
+                <dd>{userTurns}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className="side-card">
+            <div className="side-card-title">
+              <span className="side-icon side-icon--pink" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3.5 14.3 9l6 .5-4.6 3.9 1.5 5.9L12 16.2 6.8 19.3l1.5-5.9L3.7 9.5l6-.5L12 3.5Z" />
+                </svg>
+              </span>
+              Try asking
+            </div>
+            <div className="suggestion-list">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="suggestion-chip"
+                  onClick={() => handleSuggestion(s)}
+                  disabled={sending}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="side-card side-card--muted">
+            <div className="side-card-title">
+              <span className="side-icon side-icon--blue" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 3.5h8l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19V5A1.5 1.5 0 0 1 7 3.5Z" />
+                  <path d="M15 3.5V8h4M9 12.5h6M9 16h6" />
+                </svg>
+              </span>
+              Coming in S2
+            </div>
+            <p className="hint side-hint">
+              Real retrieval, grounded citations, and document previews land once
+              <code> graph/nodes.py</code> is implemented.
+            </p>
+          </div>
+        </aside>
       </div>
-
-      <form className="row" onSubmit={handleSend}>
-        <input
-          type="text"
-          placeholder="Ask a question..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={sending}
-        />
-        <button type="submit" disabled={sending}>
-          {sending ? "Sending..." : "Send"}
-        </button>
-      </form>
-
-      {activeCitation && (
-        <CitationViewer citation={activeCitation} onClose={() => setActiveCitation(null)} />
-      )}
     </section>
   );
 }
