@@ -68,13 +68,62 @@ def test_chat_returns_fixture_answer(tmp_db_path, monkeypatch):
     assert body["conversation_id"]
 
 
-def test_documents_endpoints(tmp_db_path, monkeypatch):
+def test_documents_endpoints_404_when_unknown(tmp_db_path, monkeypatch):
+    # S4: documents are real, looked up by content_hash. An unindexed hash
+    # is a 404, not fixture data -- the citation viewer needs to be able to
+    # tell "not found" apart from "found, but empty".
     client = _client(tmp_db_path, monkeypatch)
     h = "deadbeef"
-    assert client.get(f"/api/documents/{h}").status_code == 200
-    assert client.get(f"/api/documents/{h}/preview").status_code == 200
-    assert client.post(f"/api/documents/{h}/open", json={}).status_code == 200
-    assert client.post(f"/api/documents/{h}/reveal").status_code == 200
+    assert client.get(f"/api/documents/{h}").status_code == 404
+    assert client.get(f"/api/documents/{h}/preview").status_code == 404
+    assert client.post(f"/api/documents/{h}/open", json={}).status_code == 404
+    assert client.post(f"/api/documents/{h}/reveal").status_code == 404
+
+
+def test_documents_endpoints_for_indexed_document(tmp_db_path, monkeypatch):
+    client = _client(tmp_db_path, monkeypatch)
+    from db.connect import connect
+
+    conn = connect(tmp_db_path)
+    try:
+        h = "deadbeefcafebabe"
+        conn.execute(
+            "INSERT INTO documents (content_hash, title, doc_type, page_count) "
+            "VALUES (?, 'Sample.pdf', 'pdf', 3)",
+            (h,),
+        )
+        conn.execute(
+            "INSERT INTO file_locations (content_hash, path) VALUES (?, ?)",
+            (h, "/tmp/does-not-exist/Sample.pdf"),
+        )
+        conn.execute(
+            "INSERT INTO chunks (content_hash, chunk_index, text, page) "
+            "VALUES (?, 0, 'Some extracted text.', 1)",
+            (h,),
+        )
+    finally:
+        conn.close()
+
+    detail = client.get(f"/api/documents/{h}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["document"]["title"] == "Sample.pdf"
+    assert len(body["locations"]) == 1
+    assert body["chunk_count"] == 1
+
+    preview = client.get(f"/api/documents/{h}/preview")
+    assert preview.status_code == 200
+    assert "Some extracted text." in preview.json()["preview_text"]
+
+    # The file doesn't exist on disk in this test, so open/reveal succeed
+    # at the HTTP layer but report opened/revealed=False with a reason.
+    opened = client.post(f"/api/documents/{h}/open", json={})
+    assert opened.status_code == 200
+    assert opened.json()["opened"] is False
+
+    revealed = client.post(f"/api/documents/{h}/reveal")
+    assert revealed.status_code == 200
+    assert revealed.json()["revealed"] is False
 
 
 def test_facts_list_and_patch(tmp_db_path, monkeypatch):

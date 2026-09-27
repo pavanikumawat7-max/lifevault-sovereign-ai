@@ -1,5 +1,23 @@
 import { useState } from "react";
 import { sendChatMessage } from "../api/client.js";
+import CitationViewer from "../components/CitationViewer.jsx";
+
+function CitationChip({ citation, onOpen }) {
+  const filename = citation.path ? citation.path.split("/").pop() : "source";
+  const pageSuffix = citation.page ? ` p.${citation.page}` : "";
+  return (
+    <button
+      type="button"
+      className="citation-chip"
+      onClick={() => onOpen(citation)}
+      title={citation.path || citation.document_hash}
+    >
+      {citation.label ? `${citation.label}: ` : ""}
+      {filename}
+      {pageSuffix}
+    </button>
+  );
+}
 
 export default function Chat() {
   const [conversationId, setConversationId] = useState(null);
@@ -7,6 +25,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
+  const [activeCitation, setActiveCitation] = useState(null);
 
   async function handleSend(e) {
     e.preventDefault();
@@ -22,7 +41,17 @@ export default function Chat() {
     try {
       const resp = await sendChatMessage(message, conversationId, history);
       setConversationId(resp.conversation_id);
-      setHistory([...nextHistory, { role: "assistant", content: resp.answer }]);
+      setHistory([
+        ...nextHistory,
+        {
+          role: "assistant",
+          content: resp.answer,
+          citations: resp.citations || [],
+          grounded: resp.grounded,
+          confidence: resp.confidence,
+          verificationReason: resp.verification_reason,
+        },
+      ]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -34,8 +63,8 @@ export default function Chat() {
     <section>
       <h2>Chat</h2>
       <p className="hint">
-        S1 stub: answers come from <code>llm.chat()</code> in fixture mode --
-        no retrieval, grounding, or citations yet.
+        Ask a question about your indexed documents. Answers are grounded in
+        retrieved chunks; click a citation chip to preview the source.
       </p>
 
       {error && <p className="error">Error: {error}</p>}
@@ -45,6 +74,18 @@ export default function Chat() {
         {history.map((m, i) => (
           <div key={i} className={`chat-message chat-${m.role}`}>
             <strong>{m.role === "user" ? "You" : "LifeVault"}:</strong> {m.content}
+            {m.role === "assistant" && m.grounded === false && (
+              <span className="badge badge-warn" title={m.verificationReason || ""}>
+                unverified
+              </span>
+            )}
+            {m.role === "assistant" && m.citations && m.citations.length > 0 && (
+              <div className="citation-row">
+                {m.citations.map((c, ci) => (
+                  <CitationChip key={ci} citation={c} onOpen={setActiveCitation} />
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -61,6 +102,10 @@ export default function Chat() {
           {sending ? "Sending..." : "Send"}
         </button>
       </form>
+
+      {activeCitation && (
+        <CitationViewer citation={activeCitation} onClose={() => setActiveCitation(null)} />
+      )}
     </section>
   );
 }

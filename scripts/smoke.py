@@ -106,10 +106,27 @@ def main() -> int:
 
     check(client, "POST", "/api/chat", 200, {"message": "hello from smoke test"})
 
-    check(client, "GET", "/api/documents/deadbeef")
-    check(client, "GET", "/api/documents/deadbeef/preview")
-    check(client, "POST", "/api/documents/deadbeef/open", 200, {})
-    check(client, "POST", "/api/documents/deadbeef/reveal")
+    # S4: documents are real, looked up by content_hash, so an unindexed
+    # hash correctly 404s -- seed one row to exercise the "found" path too.
+    check(client, "GET", "/api/documents/deadbeef", 404)
+    from db.connect import connect as _connect
+
+    _conn = _connect(db_path)
+    try:
+        _conn.execute(
+            "INSERT OR IGNORE INTO documents (content_hash, title, doc_type, page_count) "
+            "VALUES ('smoke-doc-1', 'Smoke Test Doc.pdf', 'pdf', 1)"
+        )
+        _conn.execute(
+            "INSERT OR IGNORE INTO chunks (content_hash, chunk_index, text, page) "
+            "VALUES ('smoke-doc-1', 0, 'Smoke test extracted text.', 1)"
+        )
+    finally:
+        _conn.close()
+    check(client, "GET", "/api/documents/smoke-doc-1")
+    check(client, "GET", "/api/documents/smoke-doc-1/preview")
+    check(client, "POST", "/api/documents/smoke-doc-1/open", 200, {})
+    check(client, "POST", "/api/documents/smoke-doc-1/reveal")
 
     check(client, "GET", "/api/facts")
     check(client, "PATCH", "/api/facts/1", 200, {"user_corrected": True})

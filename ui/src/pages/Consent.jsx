@@ -1,18 +1,28 @@
 import { useEffect, useState } from "react";
-import { createRoot, deleteRoot, listRoots } from "../api/client.js";
+import {
+  createRoot,
+  deleteRoot,
+  getIndexStatus,
+  listRoots,
+  pauseIndex,
+  resumeIndex,
+} from "../api/client.js";
 
 export default function Consent() {
   const [roots, setRoots] = useState([]);
   const [newPath, setNewPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [indexPaused, setIndexPaused] = useState(false);
 
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listRoots();
-      setRoots(data.roots);
+      const [rootsData, statusData] = await Promise.all([listRoots(), getIndexStatus()]);
+      setRoots(rootsData.roots);
+      setIndexPaused(statusData.status.state === "paused");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -45,16 +55,42 @@ export default function Consent() {
     }
   }
 
+  async function toggleIndexing() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (indexPaused) {
+        await resumeIndex();
+      } else {
+        await pauseIndex();
+      }
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section>
       <h2>Consent &amp; Index Roots</h2>
       <p className="hint">
-        Folders LifeVault has permission to scan. S1 stub: additions/removals
-        aren't persisted to disk yet -- this proves the round trip through
-        the real API.
+        Folders LifeVault has permission to scan and index. Adding a folder
+        here is what grants access -- nothing outside these paths is ever
+        touched.
       </p>
 
       {error && <p className="error">Error: {error}</p>}
+
+      <div className="row" style={{ alignItems: "center" }}>
+        <button disabled={busy || loading} onClick={toggleIndexing}>
+          {indexPaused ? "Resume indexing" : "Pause indexing"}
+        </button>
+        <span className="hint">
+          {indexPaused ? "Indexing is paused for all folders." : "Indexing is active."}
+        </span>
+      </div>
 
       <form className="row" onSubmit={handleAdd}>
         <input
@@ -68,6 +104,8 @@ export default function Consent() {
 
       {loading ? (
         <p>Loading...</p>
+      ) : roots.length === 0 ? (
+        <p className="hint">No folders granted yet. Add one above to get started.</p>
       ) : (
         <table>
           <thead>
@@ -82,7 +120,7 @@ export default function Consent() {
           <tbody>
             {roots.map((root) => (
               <tr key={root.id}>
-                <td>{root.path}</td>
+                <td className="mono">{root.path}</td>
                 <td>{root.enabled ? "yes" : "no"}</td>
                 <td>{root.paused ? "yes" : "no"}</td>
                 <td>{root.granted_at ?? "--"}</td>

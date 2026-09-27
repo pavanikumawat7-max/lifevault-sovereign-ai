@@ -148,3 +148,100 @@ td {
 .chat-assistant {
   color: #9fb4ff;
 }
+
+.badge-warn {
+  margin-left: 0.5rem;
+  background: #4a3410;
+  color: #ffcf7a;
+}
+
+.citation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.citation-chip {
+  background: #1e2430;
+  color: #9fb4ff;
+  border: 1px solid #2a2f3a;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.citation-chip:hover {
+  background: #2a3142;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1rem;
+}
+
+.modal-panel {
+  background: #14171f;
+  border: 1px solid #2a2f3a;
+  border-radius: 10px;
+  padding: 1.25rem;
+  max-width: 640px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.modal-header h3 {
+  margin: 0;
+  word-break: break-word;
+}
+
+.modal-close {
+  background: transparent;
+  color: #aab2c0;
+  font-size: 1.25rem;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.citation-meta {
+  margin: 0.75rem 0;
+}
+
+.citation-quote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid #2a2f3a;
+  color: #cfd4de;
+  font-style: italic;
+}
+
+.preview-box {
+  background: #1a1e27;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.preview-box pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font-family: inherit;
+}
