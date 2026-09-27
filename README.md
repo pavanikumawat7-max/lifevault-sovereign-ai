@@ -29,10 +29,14 @@ api/ (FastAPI)                                                  ui/ (React + Vit
   routes/ -- one typed stub route module per resource
        (roots, index, chat, documents, facts, approvals, memory, audit)
 
-graph/ (LangGraph skeleton, 8 nodes)
+graph/ (LangGraph, 8 nodes -- first three real as of S3)
   retrieve -> answer -> verify_grounding -> propose_action -> policy_check
      -> [human_approval | audit_and_memory] -> [execute | audit_and_memory]
      -> audit_and_memory -> END
+  retrieve.py / answer.py / verify.py -- real S3 implementations
+  nodes.py -- the node list; re-exports the three above, stubs the rest
+
+api/search.py -- hybrid retrieval: FTS5 BM25 + sqlite-vec, fused with RRF
 
 worker/    -- scan() / parse() / index() interface (stub)
 tools/     -- tool registry interface (stub, no tools registered)
@@ -260,9 +264,10 @@ these:
   content-hash dedup, writing to `index_roots`/`documents`/`file_locations`),
   `parse()` (PDF/DOCX text extraction + chunking into `chunks`), and
   `index()` (populating `chunks_fts` and `chunks_vec`).
-- **Retrieval & answering** (`graph/nodes.py: retrieve`, `answer`,
+- ~~**Retrieval & answering** (`graph/nodes.py: retrieve`, `answer`,
   `verify_grounding`): real FTS5/vector search, real `llm.chat()` calls,
-  real citation/grounding checks.
+  real citation/grounding checks.~~ **Done in S3** -- see "S3: hybrid
+  retrieval and cited answers" below.
 
 ## S2 ingestion usage
 
@@ -291,3 +296,150 @@ the configured `LIFEVAULT_DB_PATH`.
 
 Use `docs/handovers/TEMPLATE.md` for every handover; `handovers/S1.md` is
 the completed one for this session.
+
+---
+
+## S3: hybrid retrieval and cited answers
+
+S3 makes `POST /api/chat` real: a question goes in, and a grounded answer
+with citations that name a file path and page comes back. No streaming (out
+of scope for S3), and no proposals yet (S7).
+
+### How it works
+
+```
+POST /api/chat
+  -> graph.retrieve       api/search.py: hybrid_search()
+                          FTS5 BM25 top 20  +  sqlite-vec KNN top 20
+                          fused with RRF, score = sum(1 / (60 + rank))
+                          superseded chunks skipped; duplicate content
+                          collapsed by content_hash with other locations
+                          attached as "also found at"
+  -> graph.answer         numbered chunks C1..Cn, fenced and framed as
+                          UNTRUSTED DATA; model returns JSON
+                          {answer, cited_chunk_ids, confidence}
+  -> graph.verify         every date and quoted phrase in the answer must
+                          appear in a chunk the answer cites; on failure,
+                          regenerate once, then reply "could not verify"
+```
+
+Three details worth knowing:
+
+- **Retrieved document text is untrusted.** It comes from files LifeVault
+  did not write, so a document could contain text shaped like an
+  instruction. The answer prompt fences every chunk and tells the model
+  that fenced content is evidence to quote, never a command to obey.
+- **Dates are checked semantically, not just textually.** An answer of
+  `2027-06-12` is accepted against a document saying `June 12, 2027`
+  (same day, different format), while `June 12, 2028` is rejected.
+- **An unverifiable answer is never returned.** It is replaced by the
+  literal string `could not verify`, with the reason in
+  `verification_reason`.
+
+### Contract changes (additive only)
+
+The frozen S1 shapes are unchanged. S3 adds optional fields with defaults,
+so existing clients keep working:
+
+| Model | New optional fields |
+|---|---|
+| `Citation` | `path`, `page`, `also_found_at`, `label` |
+| `ChatResponse` | `confidence`, `verification_reason`, `model`, `latency_ms` |
+
+`path` and `page` were required by the S3 acceptance gate and had no home
+in the S1 `Citation`. `LifeVaultState` likewise gained optional keys
+(`answer_cited_labels`, `answer_cited_chunk_ids`, `confidence`,
+`answer_model`, `answer_retried`, `verification`).
+
+### Running the evaluation
+
+```bash
+python scripts/generate_demo_corpus.py          # if not already generated
+python scripts/index_folder.py demo-data/synthetic
+LIFEVAULT_USE_FIXTURES=false python scripts/eval.py \
+    --markdown docs/eval_S3.md --json docs/eval_S3.json
+```
+
+10 questions with expected answers and expected source files. Question 10
+has no answer in the corpus, so refusing it is its pass condition. The
+latest results table is committed at [docs/eval_S3.md](docs/eval_S3.md).
+
+**Result: 9/10 passed, 8/10 grounded, and every one of those 8 grounded
+answers cited the expected source file (8/8).** The remaining two are both
+refusals: question 10 is *supposed* to be refused, and question 9 is a
+genuine miss documented in `docs/handovers/S3.md` -- retrieval puts the
+correct chunk at lexical rank 1 and the 3B model declines to answer anyway.
+
+`scripts/eval.py` also runs in fixture mode (no Ollama needed) to check the
+plumbing, but the content checks only pass against a real model.
+
+### Model latency and the model choice
+
+Measured on the development laptop -- **MacBook Air M1, 8 GB**, Ollama with
+Metal -- over the 10 eval questions, `top_k=4` chunks per answer, warmup
+call excluded:
+
+| Model | Size | Per-answer latency (median / max) | Notes |
+|---|---|---|---|
+| **`llama3.2`** | **3B** | **7.8s / 9.7s** | **Selected.** 9/10 eval, valid JSON every time |
+| `phi3` | 3.8B | 50.1s / 60.4s | 3x slower and less reliable JSON (4/5 on a 5-question subset) |
+| 7B class | 7B | not measured | Not pulled -- see below |
+
+**Selected model: `llama3.2` (3B)**, which is the `config.py` default.
+
+The handover plan says to fall back to the 3B model if answers take longer
+than about 15 seconds. That fallback is already the default here, and 7.8s
+median clears the bar. Two honest caveats:
+
+- **Latency varies with machine load.** Early runs on this laptop measured
+  a 13-18s median for the same questions. 8 GB is tight with a 2 GB chat
+  model plus the embedding model resident, so treat ~8s as the warm
+  best case and ~18s as the loaded case.
+- **The 7B comparison was not run**, because no 7B model was pulled on this
+  machine. The 3.8B measurement above is the evidence for the direction:
+  a larger model is dramatically slower here, not marginally. To measure a
+  7B yourself:
+  ```bash
+  ollama pull mistral
+  LIFEVAULT_USE_FIXTURES=false python scripts/eval.py --model mistral
+  ```
+
+**Warm the model before demoing.** The first call after Ollama starts pays
+the model load -- roughly 60s on this laptop, which is long enough to hit
+`llm.chat`'s 60s timeout and surface as `could not verify`. One throwaway
+call avoids it (`scripts/eval.py` does this automatically):
+
+```bash
+ollama run llama3.2 "ready" --keepalive 30m
+```
+
+### Setup fixes included in S3
+
+- `.env.example` was referenced by this README and by `run.py`'s docstring
+  but was missing from the repository. It is now present and documents
+  every variable in `config.py`.
+
+### Known repository-hygiene issue NOT fixed in S3
+
+`.venv/` and `__pycache__/` are tracked even though `.gitignore` already
+covers them, and the tracked `.venv` is broken: `.venv/bin/python` points at
+system Python 3.9 with no `site-packages`. A fresh clone that follows
+`source .venv/bin/activate` therefore gets a non-functional environment --
+**create your own virtualenv instead**:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+This was deliberately kept out of the S3 release so the S3 commit contains
+feature work only. It is a 64-file change to files P1 owns, and belongs in
+its own commit:
+
+```bash
+git rm -r --cached .venv
+git ls-files | grep __pycache__ | xargs git rm --cached
+git commit -m "chore: stop tracking .venv and __pycache__"
+```
+
+Flagged for P1, whose Day-5 B1 block is fresh-clone cold start.

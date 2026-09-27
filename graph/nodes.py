@@ -1,14 +1,19 @@
-"""The 8 LifeVault graph nodes, as typed stubs.
+"""The 8 LifeVault graph nodes.
 
 Node functions take the current LifeVaultState and return a partial dict
 of updates (the LangGraph convention for StateGraph node functions), so
 each node only needs to know about the keys it actually touches.
 
-None of these implement real retrieval, answering, grounding checks,
-proposal generation, policy decisions, execution, or memory writes --
-that is explicitly out of scope for S1. What IS locked in here is the
-*shape* of each node's output, and two behaviors later sessions must
-preserve (see graph/graph.py's routing functions):
+S3 made the first three real. `retrieve`, `answer` and `verify_grounding`
+are now thin re-exports of graph/retrieve.py, graph/answer.py and
+graph/verify.py -- the implementations live in those modules so they can
+be tested and driven by scripts/eval.py without building a graph, and so
+this file stays the one place that lists what a node is.
+
+`propose_action`, `policy_check`, `human_approval`, `execute` and
+`audit_and_memory` are still S1 stubs, to be made real in S7. What IS
+locked in here is the *shape* of each node's output, and two behaviors
+later sessions must preserve (see graph/graph.py's routing functions):
 
   1. A "deny" policy decision, or no proposal at all, routes straight to
      audit_and_memory (skipping human_approval and execute).
@@ -18,27 +23,21 @@ preserve (see graph/graph.py's routing functions):
 """
 from __future__ import annotations
 
+from graph.answer import answer
+from graph.retrieve import retrieve
 from graph.state import LifeVaultState
+from graph.verify import verify_grounding
 
-
-def retrieve(state: LifeVaultState) -> dict:
-    """..."""
-    return {"retrieved_chunks": [], "execution_result": None}
-
-
-def answer(state: LifeVaultState) -> dict:
-    """S1 stub: no real answer generation. See llm.py for the (fixture-
-    mode-capable) chat wrapper a later session will call from here."""
-    return {
-        "answer_text": "[stub] no real answer generation in S1",
-        "citations": [],
-    }
-
-
-def verify_grounding(state: LifeVaultState) -> dict:
-    """S1 stub: grounding is never verified, so `grounded` defaults to
-    False rather than being (falsely) asserted True."""
-    return {"grounded": False}
+__all__ = [
+    "retrieve",
+    "answer",
+    "verify_grounding",
+    "propose_action",
+    "policy_check",
+    "human_approval",
+    "execute",
+    "audit_and_memory",
+]
 
 
 def propose_action(state: LifeVaultState) -> dict:

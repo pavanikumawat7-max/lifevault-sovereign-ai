@@ -26,10 +26,24 @@ class LifeVaultState(TypedDict, total=False):
 
     # answer
     answer_text: str
+    # S3 additions (optional, additive -- see the module docstring):
+    #: Chunk labels ("C1", "C2") the model said it used, validated against
+    #: what it was actually shown.
+    answer_cited_labels: List[str]
+    #: The `chunks.id` values behind `answer_cited_labels`.
+    answer_cited_chunk_ids: List[int]
+    #: The model's own 0.0-1.0 self-estimate that the answer is supported.
+    confidence: float
+    #: Which model produced the current draft ("fixture" in fixture mode).
+    answer_model: str
+    #: True once the one permitted grounding retry has been spent.
+    answer_retried: bool
 
     # verify_grounding
     grounded: bool
     citations: List[Dict[str, Any]]
+    #: S3 addition: the grounding report (what was checked, what failed).
+    verification: Dict[str, Any]
 
     # propose_action
     proposal: Optional[Dict[str, Any]]

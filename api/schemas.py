@@ -105,6 +105,18 @@ class Citation(BaseModel):
     document_hash: str
     chunk_id: Optional[int] = None
     quote: str
+    # --- S3 additions (additive: new optional fields with defaults) ------
+    # The S3 acceptance gate requires every citation to name a path and a
+    # page; the S1 shape had neither. Existing clients that ignore these
+    # keep working unchanged.
+    #: Absolute path of the file this citation came from.
+    path: Optional[str] = None
+    #: 1-based page number within that file, when known.
+    page: Optional[int] = None
+    #: Other paths holding byte-identical content ("also found at").
+    also_found_at: List[str] = Field(default_factory=list)
+    #: The chunk label the model used in its answer ("C1", "C2", ...).
+    label: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -113,6 +125,16 @@ class ChatResponse(BaseModel):
     citations: List[Citation] = Field(default_factory=list)
     proposal_id: Optional[str] = None
     grounded: bool = False
+    # --- S3 additions (additive: new optional fields with defaults) ------
+    #: The model's own 0.0-1.0 estimate that the answer is fully supported.
+    confidence: float = 0.0
+    #: Why grounding passed or failed. Set when `grounded` is False so the
+    #: UI can explain a "could not verify" instead of showing a bare string.
+    verification_reason: Optional[str] = None
+    #: Which local model answered ("fixture" in fixture mode).
+    model: Optional[str] = None
+    #: Wall-clock milliseconds for retrieve + answer + verify.
+    latency_ms: Optional[int] = None
 
 
 # ---------------------------------------------------------------------

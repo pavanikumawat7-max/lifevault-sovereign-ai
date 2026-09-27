@@ -1,0 +1,301 @@
+{
+  "meta": {
+    "model": "llama3.2",
+    "embedding_model": "nomic-embed-text",
+    "use_fixtures": false,
+    "top_k": 4,
+    "documents": 103,
+    "chunks": 104,
+    "machine": "Darwin arm64 (python 3.12.13)",
+    "warmup_s": "0.6s",
+    "ran_at": "2026-09-27T11:41:47+0530"
+  },
+  "results": [
+    {
+      "id": 1,
+      "question": "When does my Dell laptop warranty expire?",
+      "answer": "June 12, 2027",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.9,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "01fbd917b458176f495cc737dab01929bb7a005553e0b199af10613e605fc78d",
+          "chunk_id": 10,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_A/dell_warranty.pdf",
+          "page": 1,
+          "also_found_at": [
+            "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_B/dell_warranty_copy.pdf"
+          ]
+        }
+      ],
+      "cited_files": [
+        "dell_warranty.pdf"
+      ],
+      "expect_file": "dell_warranty.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 79,
+      "latency_ms": 9719,
+      "pass": true
+    },
+    {
+      "id": 2,
+      "question": "What is the service tag of my Dell XPS 15?",
+      "answer": "SYNTH-XPS-2026",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "01fbd917b458176f495cc737dab01929bb7a005553e0b199af10613e605fc78d",
+          "chunk_id": 10,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_A/dell_warranty.pdf",
+          "page": 1,
+          "also_found_at": [
+            "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_B/dell_warranty_copy.pdf"
+          ]
+        }
+      ],
+      "cited_files": [
+        "dell_warranty.pdf"
+      ],
+      "expect_file": "dell_warranty.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 87,
+      "latency_ms": 7629,
+      "pass": true
+    },
+    {
+      "id": 3,
+      "question": "How much did the Dell XPS 15 laptop cost?",
+      "answer": "$1,749.00",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "1d967528356a85478e0e9edbd0aa6851a9405bd5322464ec6665605651595d4f",
+          "chunk_id": 50,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_A/dell_invoice.pdf",
+          "page": 1,
+          "also_found_at": []
+        }
+      ],
+      "cited_files": [
+        "dell_invoice.pdf"
+      ],
+      "expect_file": "dell_invoice.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 75,
+      "latency_ms": 7813,
+      "pass": true
+    },
+    {
+      "id": 4,
+      "question": "What is the invoice number for the Dell laptop?",
+      "answer": "INV-DELL-10482",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "1d967528356a85478e0e9edbd0aa6851a9405bd5322464ec6665605651595d4f",
+          "chunk_id": 50,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_A/dell_invoice.pdf",
+          "page": 1,
+          "also_found_at": []
+        }
+      ],
+      "cited_files": [
+        "dell_invoice.pdf"
+      ],
+      "expect_file": "dell_invoice.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 75,
+      "latency_ms": 7459,
+      "pass": true
+    },
+    {
+      "id": 5,
+      "question": "On what date was the Dell XPS 15 purchased?",
+      "answer": "2026-06-12",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.9,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "01fbd917b458176f495cc737dab01929bb7a005553e0b199af10613e605fc78d",
+          "chunk_id": 10,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_A/dell_warranty.pdf",
+          "page": 1,
+          "also_found_at": [
+            "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_B/dell_warranty_copy.pdf"
+          ]
+        }
+      ],
+      "cited_files": [
+        "dell_warranty.pdf"
+      ],
+      "expect_file": "dell_warranty.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 85,
+      "latency_ms": 6603,
+      "pass": true
+    },
+    {
+      "id": 6,
+      "question": "Which warranty has already expired, and on what date?",
+      "answer": "March 3, 2021",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.5,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "14d39eac941d1fe1963d471d18bd1187336ad3b06f1c0f44c73b3fb338a48969",
+          "chunk_id": 104,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_B/old_expired_warranty.pdf",
+          "page": 1,
+          "also_found_at": []
+        }
+      ],
+      "cited_files": [
+        "old_expired_warranty.pdf"
+      ],
+      "expect_file": "old_expired_warranty.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 73,
+      "latency_ms": 6012,
+      "pass": true
+    },
+    {
+      "id": 7,
+      "question": "What is the contract number on the expired refrigerator warranty?",
+      "answer": "OLD-DEMO-319",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "14d39eac941d1fe1963d471d18bd1187336ad3b06f1c0f44c73b3fb338a48969",
+          "chunk_id": 104,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_B/old_expired_warranty.pdf",
+          "page": 1,
+          "also_found_at": []
+        }
+      ],
+      "cited_files": [
+        "old_expired_warranty.pdf"
+      ],
+      "expect_file": "old_expired_warranty.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 88,
+      "latency_ms": 8145,
+      "pass": true
+    },
+    {
+      "id": 8,
+      "question": "Who is the provider on synthetic insurance record 001?",
+      "answer": "Willis PLC",
+      "grounded": true,
+      "refused": false,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [
+        {
+          "label": "C1",
+          "document_hash": "35570feebdc9f9ebc0db12f68861a4ac1d49ea092e54435a547e21c33bab2836",
+          "chunk_id": 29,
+          "path": "/Users/yadavibhatia/LifeVault/demo-data/synthetic/folder_A/record_001.pdf",
+          "page": 1,
+          "also_found_at": []
+        }
+      ],
+      "cited_files": [
+        "record_001.pdf"
+      ],
+      "expect_file": "record_001.pdf",
+      "cited_expected_file": true,
+      "missing_expected_values": [],
+      "verification_reason": null,
+      "retrieval_ms": 139,
+      "latency_ms": 8136,
+      "pass": true
+    },
+    {
+      "id": 9,
+      "question": "What is the reference number on the synthetic travel record 003?",
+      "answer": "could not verify",
+      "grounded": false,
+      "refused": true,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [],
+      "cited_files": [],
+      "expect_file": "record_003.pdf",
+      "cited_expected_file": false,
+      "missing_expected_values": [
+        "DEMO-0003"
+      ],
+      "verification_reason": "the model reported that the documents do not answer this",
+      "retrieval_ms": 87,
+      "latency_ms": 7862,
+      "pass": false
+    },
+    {
+      "id": 10,
+      "question": "What is my passport number and when does it expire?",
+      "answer": "could not verify",
+      "grounded": false,
+      "refused": true,
+      "confidence": 0.0,
+      "model": "llama3.2",
+      "retrieved": 4,
+      "citations": [],
+      "cited_files": [],
+      "expect_file": null,
+      "cited_expected_file": false,
+      "missing_expected_values": [],
+      "verification_reason": "the model reported that the documents do not answer this",
+      "retrieval_ms": 71,
+      "latency_ms": 9390,
+      "pass": true
+    }
+  ]
+}
