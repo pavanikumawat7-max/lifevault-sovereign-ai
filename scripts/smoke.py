@@ -103,6 +103,7 @@ def main() -> int:
     check(client, "POST", "/api/index/pause")
     check(client, "POST", "/api/index/resume")
     check(client, "GET", "/api/index/status")
+    check(client, "POST", "/api/index/start", json_body={})
 
     check(client, "POST", "/api/chat", 200, {"message": "hello from smoke test"})
 

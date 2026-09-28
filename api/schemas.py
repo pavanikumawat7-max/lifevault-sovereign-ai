@@ -85,6 +85,17 @@ class GetIndexStatusResponse(BaseModel):
     status: IndexStatus
 
 
+class StartIndexRequest(BaseModel):
+    root_id: Optional[int] = None
+
+
+class StartIndexResponse(BaseModel):
+    started: bool
+    roots_queued: List[int] = Field(default_factory=list)
+    status: IndexStatus
+    message: Optional[str] = None
+
+
 # ---------------------------------------------------------------------
 # Chat: POST /api/chat
 # ---------------------------------------------------------------------

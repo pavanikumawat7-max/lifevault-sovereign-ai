@@ -234,6 +234,21 @@ code {
   font-weight: 600;
 }
 
+.badge--ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.badge--error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+
+.badge--neutral {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 /* ---------- Form controls (Consent / Approvals / Expiry) ---------- */
 
 .row {

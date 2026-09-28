@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   createRoot,
   deleteRoot,
@@ -6,6 +7,7 @@ import {
   listRoots,
   pauseIndex,
   resumeIndex,
+  startIndexing,
 } from "../api/client.js";
 
 export default function Consent() {
@@ -15,6 +17,7 @@ export default function Consent() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [indexPaused, setIndexPaused] = useState(false);
+  const [indexMessage, setIndexMessage] = useState(null);
 
   async function refresh() {
     setLoading(true);
@@ -37,12 +40,31 @@ export default function Consent() {
   async function handleAdd(e) {
     e.preventDefault();
     if (!newPath.trim()) return;
+    setIndexMessage(null);
     try {
-      await createRoot(newPath.trim());
+      const created = await createRoot(newPath.trim());
       setNewPath("");
       await refresh();
+      // Granting a folder is consent to index it -- start automatically,
+      // no manual scripts/index_folder.py needed.
+      try {
+        const result = await startIndexing(created.root.id);
+        setIndexMessage(result.message);
+      } catch (indexErr) {
+        setIndexMessage(`Indexing did not start: ${indexErr.message}`);
+      }
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleIndexNow(rootId = null) {
+    setIndexMessage(null);
+    try {
+      const result = await startIndexing(rootId);
+      setIndexMessage(result.message);
+    } catch (err) {
+      setIndexMessage(`Indexing did not start: ${err.message}`);
     }
   }
 
@@ -82,13 +104,19 @@ export default function Consent() {
       </p>
 
       {error && <p className="error">Error: {error}</p>}
+      {indexMessage && <p className="hint">{indexMessage}</p>}
 
       <div className="row" style={{ alignItems: "center" }}>
         <button disabled={busy || loading} onClick={toggleIndexing}>
           {indexPaused ? "Resume indexing" : "Pause indexing"}
         </button>
+        <button disabled={busy || loading} onClick={() => handleIndexNow(null)}>
+          Index all now
+        </button>
         <span className="hint">
           {indexPaused ? "Indexing is paused for all folders." : "Indexing is active."}
+          {" "}
+          <Link to="/index-status">View progress &rarr;</Link>
         </span>
       </div>
 
@@ -99,8 +127,12 @@ export default function Consent() {
           value={newPath}
           onChange={(e) => setNewPath(e.target.value)}
         />
-        <button type="submit">Grant access</button>
+        <button type="submit">Grant access &amp; index</button>
       </form>
+      <p className="hint">
+        Granting a folder above starts indexing it automatically -- you
+        don't need to run any script yourself.
+      </p>
 
       {loading ? (
         <p>Loading...</p>
@@ -125,6 +157,9 @@ export default function Consent() {
                 <td>{root.paused ? "yes" : "no"}</td>
                 <td>{root.granted_at ?? "--"}</td>
                 <td>
+                  <button onClick={() => handleIndexNow(root.id)} disabled={!root.enabled || root.paused}>
+                    Index now
+                  </button>{" "}
                   <button onClick={() => handleDelete(root.id)}>Revoke</button>
                 </td>
               </tr>

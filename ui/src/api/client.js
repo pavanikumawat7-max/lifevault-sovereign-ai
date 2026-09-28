@@ -34,6 +34,11 @@ export const deleteRoot = (id) => request(`/api/roots/${id}`, { method: "DELETE"
 export const pauseIndex = () => request("/api/index/pause", { method: "POST" });
 export const resumeIndex = () => request("/api/index/resume", { method: "POST" });
 export const getIndexStatus = () => request("/api/index/status");
+export const startIndexing = (rootId = null) =>
+  request("/api/index/start", {
+    method: "POST",
+    body: JSON.stringify({ root_id: rootId }),
+  });
 
 // --- Chat --------------------------------------------------------------------
 export const sendChatMessage = (message, conversationId = null, history = []) =>

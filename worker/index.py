@@ -55,20 +55,35 @@ def approve_root(
 
 
 def ingest_root(root_id: int, db_path: str | None = None) -> dict:
-    """Scan and index all new/changed PDFs under one approved root."""
+    """Scan and index all new/changed PDFs under one approved root.
+
+    A single unreadable/unparseable file must not abort the whole batch:
+    each document is processed in its own try/except, failures are counted
+    and reported in the final status message, and a failed document is
+    deliberately left with zero chunks (so the next scan's
+    ``needs_processing`` check retries it automatically) instead of being
+    marked done.
+    """
     init_db(db_path)
     _set_state(db_path, "scanning", "Scanning approved root")
     try:
         batch = scan_root(root_id, db_path)
-        _set_state(db_path, "indexing", "Parsing and indexing documents")
-        processed = 0
-        chunks_indexed = 0
-        vectors_available = vector_table_available(db_path)
-        seen_hashes: set[str] = set()
-        for document in batch.documents:
-            if document.content_hash in seen_hashes or not document.needs_processing:
-                continue
-            seen_hashes.add(document.content_hash)
+    except Exception as exc:
+        _set_state(db_path, "error", str(exc))
+        raise
+
+    _set_state(db_path, "indexing", "Parsing and indexing documents")
+    processed = 0
+    failed = 0
+    chunks_indexed = 0
+    vectors_available = vector_table_available(db_path)
+    seen_hashes: set[str] = set()
+    errors: list[str] = []
+    for document in batch.documents:
+        if document.content_hash in seen_hashes or not document.needs_processing:
+            continue
+        seen_hashes.add(document.content_hash)
+        try:
             parsed = parse_pdf(document.path, document.content_hash)
             chunks = chunk_pages(parsed.pages)
             embeddings = embed_chunks(chunks)
@@ -81,26 +96,32 @@ def ingest_root(root_id: int, db_path: str | None = None) -> dict:
             )
             processed += 1
             chunks_indexed += len(chunks)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not kill the batch
+            failed += 1
+            errors.append(f"{Path(document.path).name}: {exc}")
 
-        message = (
-            f"Found {batch.result.files_found}; unique {batch.result.files_new}; "
-            f"duplicates {batch.duplicates}; skipped {batch.skipped}; "
-            f"processed {processed}"
-        )
-        _finish_state(db_path, batch, processed, message)
-        return {
-            "root_id": root_id,
-            "found": batch.result.files_found,
-            "unique": batch.result.files_new,
-            "duplicates": batch.duplicates,
-            "skipped": batch.skipped,
-            "processed": processed,
-            "chunks": chunks_indexed,
-            "vectors": vectors_available,
-        }
-    except Exception as exc:
-        _set_state(db_path, "error", str(exc))
-        raise
+    message = (
+        f"Found {batch.result.files_found}; unique {batch.result.files_new}; "
+        f"duplicates {batch.duplicates}; skipped {batch.skipped}; "
+        f"processed {processed}; failed {failed}"
+    )
+    if errors:
+        message += " -- errors: " + "; ".join(errors[:5])
+        if len(errors) > 5:
+            message += f" (+{len(errors) - 5} more)"
+    _finish_state(db_path, batch, processed, message)
+    return {
+        "root_id": root_id,
+        "found": batch.result.files_found,
+        "unique": batch.result.files_new,
+        "duplicates": batch.duplicates,
+        "skipped": batch.skipped,
+        "processed": processed,
+        "failed": failed,
+        "errors": errors,
+        "chunks": chunks_indexed,
+        "vectors": vectors_available,
+    }
 
 
 def parse_document(content_hash: str, db_path: str | None = None) -> ParseResult:

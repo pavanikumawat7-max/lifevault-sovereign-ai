@@ -59,6 +59,56 @@ def test_index_pause_resume_status(tmp_db_path, monkeypatch):
     assert "state" in resp3.json()["status"]
 
 
+def test_index_start_with_no_roots(tmp_db_path, monkeypatch):
+    client = _client(tmp_db_path, monkeypatch)
+    resp = client.post("/api/index/start", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["started"] is False
+    assert "no enabled" in body["message"].lower() or "grant a folder" in body["message"].lower()
+
+
+def test_index_start_unknown_root_404(tmp_db_path, monkeypatch):
+    client = _client(tmp_db_path, monkeypatch)
+    resp = client.post("/api/index/start", json={"root_id": 999})
+    assert resp.status_code == 404
+
+
+def test_index_start_paused_root_400(tmp_db_path, monkeypatch, tmp_path):
+    client = _client(tmp_db_path, monkeypatch)
+    created = client.post(
+        "/api/roots", json={"path": str(tmp_path), "exclude_patterns": []}
+    ).json()["root"]
+    client.post("/api/index/pause")
+    resp = client.post("/api/index/start", json={"root_id": created["id"]})
+    assert resp.status_code == 400
+
+
+def test_index_start_real_root_scans_in_background(tmp_db_path, monkeypatch, tmp_path):
+    import time
+
+    client = _client(tmp_db_path, monkeypatch)
+    created = client.post(
+        "/api/roots", json={"path": str(tmp_path), "exclude_patterns": []}
+    ).json()["root"]
+
+    resp = client.post("/api/index/start", json={"root_id": created["id"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["started"] is True
+    assert body["roots_queued"] == [created["id"]]
+    # The state flips to "scanning"/"indexing" immediately, then the
+    # background thread finishes (the folder is empty, so no PDFs to
+    # parse/embed) and settles back to "idle" -- confirms the whole
+    # grant -> auto-index -> status flow works without a manual script.
+    for _ in range(50):
+        status = client.get("/api/index/status").json()["status"]
+        if status["state"] == "idle":
+            break
+        time.sleep(0.05)
+    assert status["state"] == "idle"
+
+
 def test_chat_returns_fixture_answer(tmp_db_path, monkeypatch):
     client = _client(tmp_db_path, monkeypatch)
     resp = client.post("/api/chat", json={"message": "hello"})

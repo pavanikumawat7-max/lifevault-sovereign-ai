@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import Consent from "./pages/Consent.jsx";
 import Chat from "./pages/Chat.jsx";
+import IndexStatus from "./pages/IndexStatus.jsx";
 import Approvals from "./pages/Approvals.jsx";
 import Audit from "./pages/Audit.jsx";
 import Expiry from "./pages/Expiry.jsx";
+import { getHealth, getIndexStatus } from "./api/client.js";
 
 function IconChat() {
   return (
@@ -51,6 +54,7 @@ function IconClock() {
 const NAV_ITEMS = [
   { to: "/", label: "Chat", end: true, Icon: IconChat },
   { to: "/consent", label: "Consent & Roots", Icon: IconFolder },
+  { to: "/index-status", label: "Index Status", Icon: IconClock },
   { to: "/approvals", label: "Approvals", Icon: IconCheck },
   { to: "/audit", label: "Audit Log", Icon: IconAudit },
   { to: "/expiry", label: "Expiry & Facts", Icon: IconClock },
@@ -59,6 +63,32 @@ const NAV_ITEMS = [
 export default function App() {
   const location = useLocation();
   const isChatRoute = location.pathname === "/";
+  const [badge, setBadge] = useState({ text: "Connecting...", tone: "neutral" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshBadge() {
+      try {
+        await getHealth();
+        const { status } = await getIndexStatus();
+        if (cancelled) return;
+        setBadge({
+          text: `Connected \u00b7 ${status.documents_indexed} doc${status.documents_indexed === 1 ? "" : "s"} indexed`,
+          tone: status.state === "error" ? "error" : "ok",
+        });
+      } catch {
+        if (!cancelled) setBadge({ text: "Backend offline", tone: "error" });
+      }
+    }
+
+    refreshBadge();
+    const timer = setInterval(refreshBadge, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div className="app-shell">
@@ -67,7 +97,7 @@ export default function App() {
           <span className="brand-mark">LV</span>
           <div className="brand-text">
             <span className="brand-name">LifeVault</span>
-            <span className="badge">S1 · fixture mode</span>
+            <span className={`badge badge--${badge.tone}`}>{badge.text}</span>
           </div>
         </div>
 
@@ -97,6 +127,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Chat />} />
             <Route path="/consent" element={<Consent />} />
+            <Route path="/index-status" element={<IndexStatus />} />
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="/expiry" element={<Expiry />} />
