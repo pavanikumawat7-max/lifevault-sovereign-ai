@@ -1,73 +1,49 @@
 # LifeVault
 
-**Team Lumina -- ASYNC 2026 Track 1: Sovereign AI**
+**Team Lumina | ASYNC 2026 Track 1: Sovereign AI**
 
-LifeVault is a local-first personal document assistant: it watches folders
-you grant it access to, understands the documents in them, answers
-questions grounded in your own files, and -- eventually -- proposes
-actions (with your explicit approval) on your behalf. Everything runs on
-your machine. No cloud calls, no API keys, no data leaving your computer.
+LifeVault is a local-first personal document assistant. You grant it access
+to specific folders, it indexes the PDFs inside them, and you ask questions
+in plain language. Every answer comes with citations that name the file and
+page it came from, and an answer that cannot be backed by your documents is
+refused instead of guessed.
 
-This is the **S1 foundation**: repository structure, database schema, a
-frozen set of typed API contracts, stub implementations of every
-component, and one piece of real logic -- an append-only, hash-chained
-audit log. Everything else is intentionally a clean, typed stub for later
-sessions to build on top of without changing the contracts below.
+Everything runs on your machine. There are no cloud calls, no API keys, and
+no data leaves your computer. The language and embedding models run locally
+through [Ollama](https://ollama.com).
 
 ---
 
-## Architecture overview
+## Status
 
-```
-run.py --------------------------------------------------------------+
-  |                                                                  |
-  v                                                                  v
-api/ (FastAPI)                                                  ui/ (React + Vite)
-  main.py -- app assembly, CORS, DB init on startup                Consent / Chat / Approvals / Audit / Expiry
-  schemas.py -- frozen Pydantic request/response contracts         pages, an API client, fixture-backed
-  audit.py -- REAL hash-chained append-only audit log
-  routes/ -- one typed stub route module per resource
-       (roots, index, chat, documents, facts, approvals, memory, audit)
+| Area | State | Notes |
+|---|---|---|
+| Folder consent (grant / revoke / pause) | **Real** | Revoking a folder removes only data no other approved folder still references |
+| Ingestion (scan, parse, chunk, embed, index) | **Real** | PDF only, page-aware, no OCR |
+| Hybrid retrieval (FTS5 + sqlite-vec, RRF) | **Real** | `api/search.py` |
+| Cited answers with grounding checks | **Real** | `POST /api/chat`, no streaming |
+| Document preview, open, reveal | **Real** | `open` / `reveal` not yet verified on a real desktop |
+| Chat UI, citation chips, citation viewer | **Real** | |
+| Index status UI with pause / resume / "Index now" | **Real** | Polls every 4 seconds |
+| Hash-chained audit log and `/api/audit*` | **Real** | Nothing in the chat pipeline writes to it yet (see below) |
+| Fact extraction (`/api/facts`, Expiry page) | Stub | Returns one fixture fact |
+| Action proposals, policy, tools, human approval, execution | Stub | Graph shape is pinned; nodes are placeholders |
+| Memory (`/api/memory`) | Stub | Returns fixture data |
 
-graph/ (LangGraph, 8 nodes -- first three real as of S3)
-  retrieve -> answer -> verify_grounding -> propose_action -> policy_check
-     -> [human_approval | audit_and_memory] -> [execute | audit_and_memory]
-     -> audit_and_memory -> END
-  retrieve.py / answer.py / verify.py -- real S3 implementations
-  nodes.py -- the node list; re-exports the three above, stubs the rest
-
-api/search.py -- hybrid retrieval: FTS5 BM25 + sqlite-vec, fused with RRF
-
-worker/    -- scan() / parse() / index() interface (stub)
-tools/     -- tool registry interface (stub, no tools registered)
-policy/    -- deny-by-default policy allow-list (stub, no rules configured)
-llm.py     -- local Ollama wrapper (chat / embed / structured_output),
-              with a fixture mode that needs no model installed
-
-db/
-  schema.sql  -- all 8 tables, FTS5 full-text index + triggers, indexes
-  connect.py  -- the one place that opens a SQLite connection (WAL, FKs, busy timeout)
-  init_db.py  -- applies schema.sql; also creates the sqlite-vec table if
-                 that extension is available, sized from config
-
-config.py -- single source of truth for all configuration (env-driven)
-```
-
-The **only real feature logic in S1 is the audit log** (`api/audit.py`).
-Everything else -- routes, the graph nodes, the worker, tools, policy, the
-UI -- returns/consumes fixture data on purpose. See "What S2 is expected
-to implement" below.
+Stubs are intentional. The API contracts are frozen, so later sessions fill
+in behavior without changing the interfaces documented below.
 
 ---
 
-## Prerequisites
+## Quickstart
+
+### Prerequisites
 
 - Python 3.10+ (developed against 3.12)
 - Node.js 18+ and npm (for the UI; the API and tests work without it)
-- [Ollama](https://ollama.com) (optional -- only needed once you turn off
-  fixture mode; everything runs without it by default)
+- [Ollama](https://ollama.com) (optional: only needed once fixture mode is off)
 
-## Python setup
+### 1. Python environment
 
 ```bash
 python3 -m venv .venv
@@ -75,7 +51,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Frontend setup
+### 2. Frontend dependencies
 
 ```bash
 cd ui
@@ -83,275 +59,292 @@ npm install
 cd ..
 ```
 
-If you skip this step, `python run.py` still starts the API -- it just
-prints a note and skips launching the UI dev server.
+If you skip this, `python run.py` still starts the API; it prints a note and
+skips the UI dev server.
 
-## Environment setup
+### 3. Configuration (optional)
 
 ```bash
 cp .env.example .env
 ```
 
-Every variable in `.env.example` has a working default in `config.py`, so
-this step is optional -- LifeVault runs with no `.env` file at all, in
-fixture mode, out of the box.
+Every variable has a working default in `config.py`, so this step is
+optional. With no `.env` at all, LifeVault starts in **fixture mode**
+(see below) and runs fully offline.
 
-## How to initialize the database
-
-Happens automatically on `python run.py` / on API startup / when
-`scripts/smoke.py` runs. To do it explicitly:
-
-```bash
-python -m db.init_db
-```
-
-Safe to re-run -- every statement in `schema.sql` is `IF NOT EXISTS`.
-
-## How to run
+### 4. Run
 
 ```bash
 python run.py
 ```
 
-This is the one documented primary command. It will:
-1. Initialize the SQLite database if needed.
-2. Start the FastAPI backend at `http://127.0.0.1:8000`.
-3. Start the Vite UI dev server at `http://localhost:5173` (if `ui/node_modules` exists).
+This initializes the SQLite database if needed, starts the FastAPI backend
+at `http://127.0.0.1:8000`, and starts the Vite UI at
+`http://localhost:5173` when `ui/node_modules` exists. Press `Ctrl+C` to stop
+everything it started.
 
-Press `Ctrl+C` to stop everything it started.
-
-To run the API alone:
+Run the pieces separately if you prefer:
 
 ```bash
-uvicorn api.main:app --reload
+uvicorn api.main:app --reload      # API only
+cd ui && npm run dev               # UI only (proxies /api to :8000)
 ```
 
-To run the UI alone:
+### 5. Try it with the demo corpus
 
 ```bash
-cd ui && npm run dev
-```
-
-## How to run smoke tests
-
-```bash
-python scripts/smoke.py
-```
-
-Exercises every required endpoint via an in-process `TestClient` (no port
-needed) and fails clearly and loudly on a missing route, wrong status
-code, or unparseable JSON body.
-
-## How to run pytest
-
-```bash
-pytest -q
-```
-
-Covers: config, DB init/schema/WAL/foreign keys/FTS5, the real audit hash
-chain (including tamper detection), LLM fixture mode, worker/tool/policy
-interfaces, the frozen Pydantic schemas, every API route, and the
-LangGraph skeleton's node-to-node execution and routing rules.
-
-Tests that need `fastapi`/`pydantic` or `langgraph` use
-`pytest.importorskip`, so `pytest -q` degrades gracefully (skips instead
-of erroring) on a partial install, but a full
-`pip install -r requirements.txt` is expected to make every test run and
-pass.
-
-## How to use fixture mode
-
-`LIFEVAULT_USE_FIXTURES=true` is the default. In this mode:
-- `llm.chat()` returns a canned string, no network call.
-- `llm.embed()` returns a zero-vector of the configured
-  `LIFEVAULT_EMBEDDING_DIM`, no network call.
-- Every API route returns fixture data from `api/fixtures.py`
-  (except `/api/audit*`, which is real and backed by the actual
-  database).
-
-This is what lets `run.py`, `scripts/smoke.py`, and `pytest -q` all pass
-on a machine with no GPU and no Ollama installed.
-
-## How to configure Ollama
-
-1. Install Ollama: https://ollama.com
-2. Pull the configured models:
-   ```bash
-   ollama pull llama3.2
-   ollama pull nomic-embed-text
-   ```
-3. Set `LIFEVAULT_USE_FIXTURES=false` in `.env`.
-4. Check it's working:
-   ```bash
-   python scripts/bench_model.py
-   ```
-   This checks whether the configured model is reachable and reports a
-   real chat round-trip time. It never fabricates a number -- if fixture
-   mode is on, or the model isn't reachable, it says so and exits
-   non-zero instead of printing anything made up.
-
----
-
-## Repository structure
-
-```
-LifeVault/
-  api/
-    main.py, schemas.py, audit.py, deps.py, fixtures.py
-    routes/roots.py, index.py, chat.py, documents.py, facts.py,
-           approvals.py, memory.py, audit.py
-  db/
-    schema.sql, connect.py, init_db.py
-  graph/
-    state.py, nodes.py, graph.py
-  tools/
-    registry.py
-  policy/
-    policy.py
-  worker/
-    worker.py
-  ui/
-    src/pages/{Consent,Chat,Approvals,Audit,Expiry}.jsx
-    src/api/client.js
-  demo-data/     -- reserved for later sessions' sample documents
-  docs/handovers/TEMPLATE.md
-  handovers/     -- actual handover write-ups land here (see S1.md)
-  scripts/
-    smoke.py, bench_model.py
-  tests/
-    conftest.py + one test module per S1 component
-  config.py, llm.py, run.py, requirements.txt, .env.example, .gitignore
-```
-
----
-
-## Frozen S1 API contracts
-
-All models below live in `api/schemas.py`. **Frozen as of S1**: later
-sessions may add new *optional* fields with defaults, but must not rename,
-remove, or change the type of an existing field.
-
-| Method | Path                              | Request model            | Response model             |
-|--------|------------------------------------|---------------------------|------------------------------|
-| GET    | `/api/roots`                      | --                          | `ListRootsResponse`         |
-| POST   | `/api/roots`                      | `CreateRootRequest`         | `CreateRootResponse`        |
-| DELETE | `/api/roots/{id}`                 | --                          | `DeleteRootResponse`        |
-| POST   | `/api/index/pause`                | --                          | `PauseIndexResponse`        |
-| POST   | `/api/index/resume`               | --                          | `ResumeIndexResponse`       |
-| GET    | `/api/index/status`               | --                          | `GetIndexStatusResponse`    |
-| POST   | `/api/chat`                       | `ChatRequest`               | `ChatResponse`               |
-| GET    | `/api/documents/{hash}`           | --                          | `DocumentDetailResponse`    |
-| GET    | `/api/documents/{hash}/preview`   | --                          | `DocumentPreviewResponse`   |
-| POST   | `/api/documents/{hash}/open`      | `OpenDocumentRequest`       | `OpenDocumentResponse`      |
-| POST   | `/api/documents/{hash}/reveal`    | --                          | `RevealDocumentResponse`    |
-| GET    | `/api/facts`                      | --                          | `ListFactsResponse`         |
-| PATCH  | `/api/facts/{id}`                 | `UpdateFactRequest`         | `UpdateFactResponse`        |
-| POST   | `/api/approvals/{proposal_id}`    | `ApprovalDecisionRequest`   | `ApprovalDecisionResponse`  |
-| GET    | `/api/memory`                     | --                          | `MemoryResponse`             |
-| GET    | `/api/audit`                      | --                          | `AuditListResponse` (real)  |
-| GET    | `/api/audit/verify`               | --                          | `AuditVerifyResponse` (real)|
-
-Plus `GET /api/health` (not part of the frozen resource contracts, just a
-liveness check).
-
-## What S2 is expected to implement
-
-S1 deliberately leaves all of the following as typed stubs/interfaces.
-**None of the frozen contracts above should need to change** to build
-these:
-
-- **Worker** (`worker/worker.py`): real `scan()` (filesystem watching +
-  content-hash dedup, writing to `index_roots`/`documents`/`file_locations`),
-  `parse()` (PDF/DOCX text extraction + chunking into `chunks`), and
-  `index()` (populating `chunks_fts` and `chunks_vec`).
-- ~~**Retrieval & answering** (`graph/nodes.py: retrieve`, `answer`,
-  `verify_grounding`): real FTS5/vector search, real `llm.chat()` calls,
-  real citation/grounding checks.~~ **Done in S3** -- see "S3: hybrid
-  retrieval and cited answers" below.
-
-## S2 ingestion usage
-
-Generate the synthetic corpus, then approve and index any folder:
-
-```bash
-python scripts/generate_demo_corpus.py
+python scripts/generate_demo_corpus.py          # only if demo-data/synthetic is missing
 python scripts/index_folder.py demo-data/synthetic
 ```
 
-The CLI prints found, unique, duplicate, skipped, processed, chunk, and
-vector-availability counts. It writes documents, locations, page-aware
-chunks, FTS5 rows, and—when `sqlite-vec` is available—`chunks_vec` rows to
-the configured `LIFEVAULT_DB_PATH`.
-- **Proposals & policy** (`graph/nodes.py: propose_action`, `policy_check`;
-  `tools/registry.py`; `policy/policy.py`): real tool registrations, real
-  `PolicyRule`s, real proposal generation written to the `proposals` table.
-- **Human approval** (`graph/nodes.py: human_approval`): replace the
-  placeholder with a real LangGraph interrupt that pauses the graph until
-  `POST /api/approvals/{proposal_id}` resumes it with the human's decision.
-- **Execution & memory** (`graph/nodes.py: execute`, `audit_and_memory`):
-  actually invoke the approved tool, and write real rows to `audit_log`
-  (via `api.audit.AuditLog.log(...)`, already real and tested) and `memory`.
-- **Real UI behavior**: wire the existing 5 pages to the real endpoints
-  once they return real data instead of fixtures.
+Or do it from the UI: open **Consent & Roots**, add the
+`demo-data/synthetic` folder, and click **Index now**.
 
-Use `docs/handovers/TEMPLATE.md` for every handover; `handovers/S1.md` is
-the completed one for this session.
+Then open **Chat** and ask a question such as *"When does my Dell laptop
+warranty expire?"* Click a citation chip to open the citation viewer, which
+shows the quoted text, the file path, the page, and any other locations
+holding an identical copy.
 
 ---
 
-## S3: hybrid retrieval and cited answers
+## Fixture mode vs. real models
 
-S3 makes `POST /api/chat` real: a question goes in, and a grounded answer
-with citations that name a file path and page comes back. No streaming (out
-of scope for S3), and no proposals yet (S7).
+`LIFEVAULT_USE_FIXTURES=true` is the default, so a fresh clone runs with no
+GPU and no Ollama. In fixture mode:
 
-### How it works
+- `llm.chat()` returns a canned string and `llm.embed()` returns a zero vector
+  of the configured width. No network calls are made.
+- Only the keyword (BM25) side of retrieval carries signal, because every
+  stored vector is equidistant.
+- Fixture answers do not reflect your documents, so content checks only mean
+  something against a real model.
 
-```
-POST /api/chat
-  -> graph.retrieve       api/search.py: hybrid_search()
-                          FTS5 BM25 top 20  +  sqlite-vec KNN top 20
-                          fused with RRF, score = sum(1 / (60 + rank))
-                          superseded chunks skipped; duplicate content
-                          collapsed by content_hash with other locations
-                          attached as "also found at"
-  -> graph.answer         numbered chunks C1..Cn, fenced and framed as
-                          UNTRUSTED DATA; model returns JSON
-                          {answer, cited_chunk_ids, confidence}
-  -> graph.verify         every date and quoted phrase in the answer must
-                          appear in a chunk the answer cites; on failure,
-                          regenerate once, then reply "could not verify"
+To use real local models:
+
+```bash
+ollama pull llama3.2               # chat model, 3B
+ollama pull nomic-embed-text       # embeddings, 768 dimensions
 ```
 
-Three details worth knowing:
+Then set `LIFEVAULT_USE_FIXTURES=false` in `.env`, re-index any folders you
+indexed in fixture mode (so they get real embeddings), and check the setup:
 
-- **Retrieved document text is untrusted.** It comes from files LifeVault
-  did not write, so a document could contain text shaped like an
-  instruction. The answer prompt fences every chunk and tells the model
-  that fenced content is evidence to quote, never a command to obey.
-- **Dates are checked semantically, not just textually.** An answer of
-  `2027-06-12` is accepted against a document saying `June 12, 2027`
-  (same day, different format), while `June 12, 2028` is rejected.
-- **An unverifiable answer is never returned.** It is replaced by the
-  literal string `could not verify`, with the reason in
-  `verification_reason`.
+```bash
+python scripts/bench_model.py
+```
 
-### Contract changes (additive only)
+`bench_model.py` reports a real chat round-trip time. It never prints a made-up
+number: if fixture mode is on or the model is unreachable, it says so and
+exits non-zero.
 
-The frozen S1 shapes are unchanged. S3 adds optional fields with defaults,
-so existing clients keep working:
+**Warm the model before a demo.** The first call after Ollama starts pays the
+model load, roughly 60 seconds on the development laptop. That is long enough
+to hit `llm.chat`'s 60-second timeout, which then surfaces as
+`could not verify`. One throwaway call avoids it:
 
-| Model | New optional fields |
+```bash
+ollama run llama3.2 "ready" --keepalive 30m
+```
+
+---
+
+## Configuration
+
+All settings are environment variables read by `config.py`, which is the
+single source of truth. `.env.example` documents each one.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LIFEVAULT_DB_PATH` | `data/lifevault.db` | SQLite database (created automatically) |
+| `LIFEVAULT_VAULT_DIR` | `vault` | Where action tools will be allowed to write (reserved for S7) |
+| `LIFEVAULT_DEMO_DATA_DIR` | `demo-data` | Sample documents |
+| `LIFEVAULT_MODEL_NAME` | `llama3.2` | Ollama chat model |
+| `LIFEVAULT_EMBEDDING_MODEL_NAME` | `nomic-embed-text` | Ollama embedding model |
+| `LIFEVAULT_EMBEDDING_DIM` | `768` | Vector width; must match the embedding model. Changing it requires a re-index |
+| `LIFEVAULT_OLLAMA_HOST` | `http://localhost:11434` | Ollama server |
+| `LIFEVAULT_MAX_UPLOAD_SIZE_MB` | `50` | Files larger than this are skipped during ingestion |
+| `LIFEVAULT_MAX_CHUNK_CHARS` | `2000` | Defined in `config.py` but not currently read; chunking is token-based (about 500 tokens) |
+| `LIFEVAULT_USE_FIXTURES` | `true` | `true` = no model calls; `false` = real Ollama |
+| `LIFEVAULT_API_HOST` / `LIFEVAULT_API_PORT` | `127.0.0.1` / `8000` | API bind address |
+| `LIFEVAULT_UI_DEV_PORT` | `5173` | Vite dev server port |
+| `LIFEVAULT_CORS_ORIGINS` | `http://localhost:5173` | Allowed origins, comma-separated |
+| `LIFEVAULT_LOG_LEVEL` | `INFO` | Logging level |
+
+If you change the API or UI ports, also update the proxy in
+`ui/vite.config.js`, which currently targets `http://127.0.0.1:8000`.
+
+---
+
+## The UI
+
+| Page | What it does |
 |---|---|
-| `Citation` | `path`, `page`, `also_found_at`, `label` |
-| `ChatResponse` | `confidence`, `verification_reason`, `model`, `latency_ms` |
+| **Chat** | Ask questions. Answers show citation chips (`label: filename p.N`) and an "unverified" badge, with the reason as a tooltip, when grounding failed |
+| **Consent & Roots** | Grant or revoke folders, start indexing for a folder, and pause or resume indexing globally |
+| **Index Status** | Live state (idle, scanning, indexing, paused, error), folder counts, documents and chunks indexed, last run time |
+| **Approvals** | Placeholder; shows one fixture proposal until S7 |
+| **Audit Log** | Real entries from the hash-chained log, plus an integrity check |
+| **Expiry & Facts** | Placeholder; shows a fixture fact until fact extraction lands |
 
-`path` and `page` were required by the S3 acceptance gate and had no home
-in the S1 `Citation`. `LifeVaultState` likewise gained optional keys
-(`answer_cited_labels`, `answer_cited_chunk_ids`, `confidence`,
-`answer_model`, `answer_retried`, `verification`).
+The **citation viewer** (opened from any citation chip) previews the cited
+chunk, lists "also found at" duplicates, and offers **Open original** and
+**Reveal in file manager**.
 
-### Running the evaluation
+---
+
+## How it works
+
+```
+run.py ----------------------------------------------------------+
+  |                                                              |
+  v                                                              v
+api/ (FastAPI)                                         ui/ (React + Vite)
+  main.py      app assembly, CORS, DB init on startup     Chat, Consent, Index Status,
+  schemas.py   frozen Pydantic request/response models    Approvals, Audit, Expiry,
+  audit.py     hash-chained append-only audit log         citation viewer
+  search.py    hybrid retrieval (FTS5 + sqlite-vec + RRF)
+  routes/      one module per resource
+
+graph/ (LangGraph, 8 nodes; the first three are real)
+  retrieve -> answer -> verify_grounding -> propose_action -> policy_check
+    -> [human_approval | audit_and_memory] -> [execute | audit_and_memory]
+    -> audit_and_memory -> END
+
+worker/    scan -> parse -> chunk -> embed -> index
+tools/     tool registry interface (no tools registered yet)
+policy/    deny-by-default allow-list (no rules configured yet)
+llm.py     local Ollama wrapper: chat / embed / structured_output, with fixture mode
+db/        schema.sql, connection helper (WAL, foreign keys), init
+config.py  single source of truth for configuration
+```
+
+### Ingestion (`worker/`)
+
+Indexing only reads your files; it never modifies them. For each approved
+folder the worker:
+
+1. **Scans** with read-only `os.scandir()`. It skips hidden and runtime
+   files, videos, executables, incomplete downloads, unsupported formats,
+   anything matching the folder's exclude globs, and files over the size limit.
+2. **Deduplicates** by content. A cheap path/size/mtime check avoids
+   re-hashing unchanged files; otherwise a streaming SHA-256 identifies the
+   document. The same content in two places is one document with two
+   locations.
+3. **Parses** PDFs page by page with PyMuPDF (no OCR).
+4. **Chunks** into roughly 500-token pieces with a 60-token overlap, keeping
+   page number, ordinal, and source position.
+5. **Embeds** through `llm.embed` in batches of 32.
+6. **Indexes** chunks, FTS5 rows, and (when `sqlite-vec` is available) vectors
+   in a single transaction.
+
+FTS5 and everything else keep working if the `sqlite-vec` extension cannot
+load on a given machine; only vector search is lost.
+
+### Question answering (`POST /api/chat`)
+
+```
+question
+  -> retrieve   FTS5 BM25 top 20 + sqlite-vec KNN top 20, fused with
+                Reciprocal Rank Fusion: score = sum(1 / (60 + rank)).
+                Superseded chunks are skipped. Identical content is
+                collapsed by content hash, with other locations attached
+                as "also found at". The top 4 chunks go to the model.
+  -> answer     Chunks are numbered C1..Cn, fenced, and framed as
+                UNTRUSTED DATA. The model returns JSON:
+                {answer, cited_chunk_ids, confidence}. Temperature is 0.
+  -> verify     Every date and every quoted phrase in the answer must
+                appear in a chunk the answer cites. On failure the answer
+                is regenerated once with the reason fed back; if it fails
+                again the reply is the literal string "could not verify".
+```
+
+Three properties worth knowing:
+
+- **Retrieved text is untrusted.** Documents are files LifeVault did not
+  write, so one could contain text shaped like an instruction. The prompt
+  tells the model that fenced content is evidence to quote, never a command.
+- **Dates are compared semantically.** `2027-06-12` is accepted against a
+  document saying `June 12, 2027` (same day, different format), while
+  `June 12, 2028` is rejected.
+- **An unverifiable answer is never returned.** It is replaced by
+  `could not verify`, with the reason in `verification_reason`. Citations the
+  model invents (a label it was never shown) are dropped and counted as a
+  grounding failure.
+
+### Audit log (`api/audit.py`)
+
+Each row commits to its event, canonicalized payload, timestamp, and the
+previous row's hash. Editing, reordering, or splicing any historical row
+breaks the chain from that point on, and `GET /api/audit/verify` reports the
+first offending row. The module uses only the standard library.
+
+The log and its endpoints are real and tested. Wiring the chat pipeline to
+write to it is part of `audit_and_memory`, which is still a stub.
+
+---
+
+## API
+
+All models live in `api/schemas.py`. Contracts are **frozen**: later sessions
+may add new optional fields with defaults, but must not rename, remove, or
+retype an existing field.
+
+| Method | Path | Request | Response | State |
+|---|---|---|---|---|
+| GET | `/api/roots` | | `ListRootsResponse` | Real |
+| POST | `/api/roots` | `CreateRootRequest` | `CreateRootResponse` | Real |
+| DELETE | `/api/roots/{id}` | | `DeleteRootResponse` | Real |
+| POST | `/api/index/start` | `StartIndexRequest` | `StartIndexResponse` | Real |
+| POST | `/api/index/pause` | | `PauseIndexResponse` | Real |
+| POST | `/api/index/resume` | | `ResumeIndexResponse` | Real |
+| GET | `/api/index/status` | | `GetIndexStatusResponse` | Real |
+| POST | `/api/chat` | `ChatRequest` | `ChatResponse` | Real |
+| GET | `/api/documents/{hash}` | | `DocumentDetailResponse` | Real |
+| GET | `/api/documents/{hash}/preview` | | `DocumentPreviewResponse` | Real |
+| POST | `/api/documents/{hash}/open` | `OpenDocumentRequest` | `OpenDocumentResponse` | Real |
+| POST | `/api/documents/{hash}/reveal` | | `RevealDocumentResponse` | Real |
+| GET | `/api/facts` | | `ListFactsResponse` | Fixture |
+| PATCH | `/api/facts/{id}` | `UpdateFactRequest` | `UpdateFactResponse` | Fixture |
+| POST | `/api/approvals/{proposal_id}` | `ApprovalDecisionRequest` | `ApprovalDecisionResponse` | Fixture |
+| GET | `/api/memory` | | `MemoryResponse` | Fixture |
+| GET | `/api/audit` | | `AuditListResponse` | Real |
+| GET | `/api/audit/verify` | | `AuditVerifyResponse` | Real |
+| GET | `/api/health` | | liveness check | Real |
+
+Notes:
+
+- `/api/index/start` runs ingestion in a background thread and returns
+  immediately; poll `/api/index/status` for progress. Only one ingest run
+  can be active at a time.
+- `/api/documents/{hash}*` return 404 for a hash that is not indexed.
+  `open` and `reveal` shell out to the platform opener (`open`, `xdg-open`, or
+  `explorer`) and report `opened: false` with a message on any failure rather
+  than raising.
+- Interactive docs are available at `http://127.0.0.1:8000/docs` while the API
+  is running.
+
+## Testing
+
+```bash
+pytest -q                          # backend suite
+python scripts/smoke.py            # in-process check of every endpoint
+cd ui && npm test                  # UI unit tests (citation helpers and chips)
+cd ui && npm run build             # production build check
+```
+
+- `pytest -q` covers config, DB init/schema/WAL/foreign keys/FTS5, the audit
+  hash chain (including tamper detection), LLM fixture mode, ingestion,
+  hybrid retrieval, grounding verification, the frozen schemas, every API
+  route, and the graph's routing rules. Tests that need `fastapi`, `pydantic`,
+  or `langgraph` use `pytest.importorskip`, so a partial install skips rather
+  than errors. A full `pip install -r requirements.txt` runs everything.
+- `scripts/smoke.py` uses an in-process `TestClient` (no port needed) and
+  fails loudly on a missing route, wrong status code, or unparseable body.
+- The UI has not been click-tested in a browser in CI. Before a live demo,
+  open `http://localhost:5173` once and click through **Consent -> Index
+  Status -> Chat -> a citation chip -> Open / Reveal**.
+
+### Answer-quality evaluation
 
 ```bash
 python scripts/generate_demo_corpus.py          # if not already generated
@@ -360,86 +353,102 @@ LIFEVAULT_USE_FIXTURES=false python scripts/eval.py \
     --markdown docs/eval_S3.md --json docs/eval_S3.json
 ```
 
-10 questions with expected answers and expected source files. Question 10
-has no answer in the corpus, so refusing it is its pass condition. The
-latest results table is committed at [docs/eval_S3.md](docs/eval_S3.md).
+The eval runs 10 questions with expected answers and expected source files.
+Question 10 has no answer in the corpus, so refusing it is its pass
+condition. The full table is committed at [docs/eval_S3.md](docs/eval_S3.md).
 
-**Result: 9/10 passed, 8/10 grounded, and every one of those 8 grounded
-answers cited the expected source file (8/8).** The remaining two are both
-refusals: question 10 is *supposed* to be refused, and question 9 is a
-genuine miss documented in `docs/handovers/S3.md` -- retrieval puts the
-correct chunk at lexical rank 1 and the 3B model declines to answer anyway.
+**Result (S3, `llama3.2`): 9 of 10 passed and 8 of 10 grounded. Every
+grounded answer cited the expected source file.** The two ungrounded results
+are both refusals: question 10 is supposed to be refused, and question 9 is a
+genuine miss (retrieval ranks the right chunk first, but the 3B model declines
+to answer). `scripts/eval.py` also runs in fixture mode to exercise the
+plumbing, but content checks only pass against a real model.
 
-`scripts/eval.py` also runs in fixture mode (no Ollama needed) to check the
-plumbing, but the content checks only pass against a real model.
+### Model choice and latency
 
-### Model latency and the model choice
+Measured at S3 on a MacBook Air M1 with 8 GB, using Ollama with Metal, over
+the 10 eval questions with 4 chunks per answer and the warmup call excluded:
 
-Measured on the development laptop -- **MacBook Air M1, 8 GB**, Ollama with
-Metal -- over the 10 eval questions, `top_k=4` chunks per answer, warmup
-call excluded:
-
-| Model | Size | Per-answer latency (median / max) | Notes |
+| Model | Size | Latency (median / max) | Notes |
 |---|---|---|---|
-| **`llama3.2`** | **3B** | **7.8s / 9.7s** | **Selected.** 9/10 eval, valid JSON every time |
-| `phi3` | 3.8B | 50.1s / 60.4s | 3x slower and less reliable JSON (4/5 on a 5-question subset) |
-| 7B class | 7B | not measured | Not pulled -- see below |
+| **`llama3.2`** | **3B** | **7.8s / 9.7s** | **Selected default.** 9/10 on the eval, valid JSON every time |
+| `phi3` | 3.8B | 50.1s / 60.4s | About 6x slower, and less reliable JSON (4/5 on a 5-question subset) |
+| 7B class | 7B | not measured | No 7B model was pulled |
 
-**Selected model: `llama3.2` (3B)**, which is the `config.py` default.
-
-The handover plan says to fall back to the 3B model if answers take longer
-than about 15 seconds. That fallback is already the default here, and 7.8s
-median clears the bar. Two honest caveats:
-
-- **Latency varies with machine load.** Early runs on this laptop measured
-  a 13-18s median for the same questions. 8 GB is tight with a 2 GB chat
-  model plus the embedding model resident, so treat ~8s as the warm
-  best case and ~18s as the loaded case.
-- **The 7B comparison was not run**, because no 7B model was pulled on this
-  machine. The 3.8B measurement above is the evidence for the direction:
-  a larger model is dramatically slower here, not marginally. To measure a
-  7B yourself:
-  ```bash
-  ollama pull mistral
-  LIFEVAULT_USE_FIXTURES=false python scripts/eval.py --model mistral
-  ```
-
-**Warm the model before demoing.** The first call after Ollama starts pays
-the model load -- roughly 60s on this laptop, which is long enough to hit
-`llm.chat`'s 60s timeout and surface as `could not verify`. One throwaway
-call avoids it (`scripts/eval.py` does this automatically):
+Treat about 8s as the warm best case. On an 8 GB machine, latency rose to
+13 to 18s under load, since the chat and embedding models are both resident.
+To compare a 7B model yourself:
 
 ```bash
-ollama run llama3.2 "ready" --keepalive 30m
+ollama pull mistral
+LIFEVAULT_USE_FIXTURES=false python scripts/eval.py --model mistral
 ```
 
-### Setup fixes included in S3
+---
 
-- `.env.example` was referenced by this README and by `run.py`'s docstring
-  but was missing from the repository. It is now present and documents
-  every variable in `config.py`.
+## Repository structure
 
-### Known repository-hygiene issue NOT fixed in S3
-
-`.venv/` and `__pycache__/` are tracked even though `.gitignore` already
-covers them, and the tracked `.venv` is broken: `.venv/bin/python` points at
-system Python 3.9 with no `site-packages`. A fresh clone that follows
-`source .venv/bin/activate` therefore gets a non-functional environment --
-**create your own virtualenv instead**:
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+```
+api/          main.py, schemas.py, audit.py, search.py, deps.py, fixtures.py
+  routes/     roots, index, chat, documents, facts, approvals, memory, audit
+db/           schema.sql, connect.py, init_db.py
+graph/        state.py, graph.py, nodes.py, retrieve.py, answer.py, verify.py
+worker/       worker.py, scanner.py, parse.py, chunk.py, index.py
+tools/        registry.py
+policy/       policy.py
+ui/
+  src/        App.jsx, pages/, components/, api/client.js, utils/
+  tests/      citation helper and chip tests
+scripts/      smoke.py, bench_model.py, eval.py, index_folder.py,
+              generate_demo_corpus.py
+tests/        one module per component, plus S2 ingestion and S3 retrieval
+demo-data/    synthetic corpus (PDFs, DOCX, one screenshot)
+docs/         eval_S3.md/.json, handovers/
+data/         SQLite database lives here (git-ignored)
+vault/        reserved for action-tool output (S7)
+config.py, llm.py, run.py, requirements.txt, .env.example, pytest.ini
 ```
 
-This was deliberately kept out of the S3 release so the S3 commit contains
-feature work only. It is a 64-file change to files P1 owns, and belongs in
-its own commit:
+### Demo corpus
 
-```bash
-git rm -r --cached .venv
-git ls-files | grep __pycache__ | xargs git rm --cached
-git commit -m "chore: stop tracking .venv and __pycache__"
-```
+`demo-data/synthetic` holds 110 files: 104 PDFs (100 filler records, a Dell
+invoice, a Dell warranty, an exact duplicate of that warranty in `folder_B`,
+and an expired refrigerator warranty), plus 5 DOCX notes and 1 screenshot.
+Indexing it yields 103 unique documents (one duplicate) and 104 chunks. The
+DOCX and screenshot files are skipped because ingestion is PDF-only. All
+content is synthetic.
 
-Flagged for P1, whose Day-5 B1 block is fresh-clone cold start.
+---
+
+## Known limitations
+
+- **PDF only.** DOCX, images, and scans are skipped; there is no OCR.
+- **Indexing is explicit.** It runs from **Index now** in the UI or from
+  `scripts/index_folder.py`. There is no filesystem watcher yet.
+- **The 3B model can refuse answerable questions.** Retrieval may surface and
+  cite the right chunk while the model still declines, especially when the
+  question needs an inference beyond the text (for example *"My screen is
+  flickering, am I still covered?"*). The reliable phrasing on the demo corpus
+  is *"When does my Dell laptop warranty expire?"* Structured fact extraction
+  (see roadmap) is the planned fix.
+- **Cold model load can look like a failure.** See "Warm the model" above.
+- **Vector search is noisy on the demo corpus,** because 98 of its 103
+  documents are near-identical filler text. The relevant chunk still lands in
+  the top 4 for well-formed questions.
+- **No streaming.** Chat returns the full answer as JSON.
+- **`open` / `reveal` are unverified on a real desktop.** The citation viewer
+  always shows the path and quote, so it degrades gracefully if they fail.
+- **Facts, approvals, and memory return fixture data,** and the audit log is
+  not yet written to by the chat pipeline.
+
+### Repository hygiene
+
+The current tree tracks files that should not be committed:
+
+- `__pycache__/` directories (already listed in `.gitignore`, but tracked).
+- `ui/node_modules/`, which is not in `.gitignore` and includes
+  Windows-only binaries (`@esbuild/win32-x64`, `@rollup/rollup-win32-*`).
+  Run `npm install` in `ui/` on your own machine regardless.
+
+Always create your own virtualenv rather than reusing any environment from a
+clone.
