@@ -214,6 +214,13 @@ class Fact(BaseModel):
     source_document_hash: Optional[str] = None
     source_quote: Optional[str] = None
     user_corrected: bool = False
+    # --- S6 additions (additive: new optional fields with defaults) ------
+    #: The chunk the value was read out of, for citation back to a page.
+    source_chunk_id: Optional[int] = None
+    #: Title of the source document, so the UI need not fetch it separately.
+    document_title: Optional[str] = None
+    #: Human-readable field name ("Expiry Date") for display.
+    label: Optional[str] = None
 
 
 class ListFactsResponse(BaseModel):
@@ -243,15 +250,50 @@ class Proposal(BaseModel):
     evidence_document_hashes: List[str] = Field(default_factory=list)
     status: str = "pending"
     decision: Optional[str] = None
+    # --- S7 additions (additive: new optional fields with defaults) ------
+    #: Sensitivity label from the policy rule, shown as a badge.
+    tier: Optional[str] = None
+    #: Parameter names whose values came from document text and look like
+    #: injected instructions. The approval card highlights these.
+    untrusted_fields: List[str] = Field(default_factory=list)
+    #: LangGraph thread to resume; how approval survives an API restart.
+    thread_id: Optional[str] = None
+    created_at: Optional[str] = None
+    decided_at: Optional[str] = None
 
 
 class ApprovalDecisionRequest(BaseModel):
-    decision: Literal["approve", "deny"]
+    # --- S7 additive change ---------------------------------------------
+    # S1 froze this as Literal["approve", "deny"]. S7 needs "edit" and the
+    # plan's own wording is approve / edit / reject, so the literal is
+    # WIDENED (never narrowed) and the two original values keep working
+    # unchanged. "deny" and "reject" are accepted as synonyms.
+    decision: Literal["approve", "deny", "edit", "reject"]
     note: Optional[str] = None
+    #: Replacement parameters for decision="edit". Merged over the proposal's
+    #: parameters and re-validated by policy before anything executes.
+    parameters: Optional[Dict[str, Any]] = None
+
+
+class ListProposalsResponse(BaseModel):
+    """S7 additive response: the approval queue."""
+
+    proposals: List[Proposal] = Field(default_factory=list)
 
 
 class ApprovalDecisionResponse(BaseModel):
     proposal: Proposal
+    # --- S7 additions (additive: new optional fields with defaults) ------
+    #: True when the approved action actually ran.
+    executed: bool = False
+    #: The tool's own result (paths written, ids created).
+    result: Optional[Dict[str, Any]] = None
+    #: What the human changed, field by field: {"due_date": {"from":..,"to":..}}.
+    edit_diff: Optional[Dict[str, Any]] = None
+    #: Audit rows appended while handling this decision.
+    audit_events: List[Dict[str, Any]] = Field(default_factory=list)
+    #: Set when the decision could not be applied.
+    message: Optional[str] = None
 
 
 # ---------------------------------------------------------------------

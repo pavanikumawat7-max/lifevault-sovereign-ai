@@ -443,3 +443,137 @@ git commit -m "chore: stop tracking .venv and __pycache__"
 ```
 
 Flagged for P1, whose Day-5 B1 block is fresh-clone cold start.
+
+---
+
+## S5–S8: watcher, OCR, facts, actions and dashboards
+
+All eight sessions are now implemented — every graph node is real. See
+[docs/handovers/S5-S8.md](docs/handovers/S5-S8.md) for the full note,
+including the process caveat that these four sessions were done in one
+sitting by one person rather than by four people in rotation.
+
+### What was added
+
+| Session | Feature |
+|---|---|
+| **S5** | `watchdog` filesystem watcher (live indexing) and local OCR via RapidOCR |
+| **S6** | Fact extraction: warranty/invoice fields, ISO dates, `/api/facts` filters, facts injected into retrieval |
+| **S7** | Proposals, policy gate, human approval with interrupt/resume, two tools, execution, audit + memory |
+| **S8** | Approval card, audit viewer with edit diffs, expiry dashboard, memory table |
+
+### New dependencies (all local, no cloud)
+
+```
+watchdog>=4.0,<7.0              # S5 watcher
+rapidocr-onnxruntime>=1.3,<2.0  # S5 OCR (ONNX models, cached locally)
+dateparser>=1.2,<2.0            # S6 date normalization
+```
+
+RapidOCR downloads its models once on first use. `worker/ocr.py` degrades to
+"no OCR" if it cannot load, so nothing hard-fails without it.
+
+### `run.py` now starts three processes
+
+API + **watcher** + UI. The watcher indexes new files within seconds and can
+also be run alone:
+
+```bash
+python -m worker.watcher
+```
+
+It watches every approved, unpaused root, debounces events, waits for a
+file's size to stop changing, skips partial downloads, and never watches the
+vault (LifeVault writes `.ics`/`.eml` there — indexing its own output would
+loop). A deleted file is flagged `missing`; its document, chunks and facts
+are kept so citations degrade gracefully instead of vanishing.
+
+### OCR is a fallback, not the default
+
+A PDF page with 50+ characters of embedded text is never OCR'd — the text
+layer is more accurate and far faster. OCR runs on images and on PDF pages
+that come back nearly empty. An image yielding almost no text is stored as
+metadata only.
+
+### Actions: two tools, both local, neither destructive
+
+```
+create_reminder  -> a reminders row + an .ics file in the vault
+draft_email      -> an .eml file in the vault, NEVER sent
+```
+
+There is no delete tool and no network tool. Every action passes a policy
+gate first: a deny-by-default tool allow-list, Pydantic parameter
+validation, paths confined to the vault, and **at least one document
+citation**. Values that came from document text and look like injected
+instructions are flagged so the approval card can highlight them — flagged,
+not blocked, because a human decides.
+
+Nothing executes without approval:
+
+```bash
+# 1. ask something with an expiry date -> a reminder is proposed
+curl -s -X POST http://127.0.0.1:8000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"When does my Dell laptop warranty expire?"}'
+
+# 2. see the queue
+curl -s 'http://127.0.0.1:8000/api/approvals?status=pending'
+
+# 3. approve, or edit and approve, or reject
+curl -s -X POST http://127.0.0.1:8000/api/approvals/<id> \
+  -H 'Content-Type: application/json' \
+  -d '{"decision":"edit","parameters":{"due_date":"2027-05-01"}}'
+
+# 4. the chain records all of it
+curl -s http://127.0.0.1:8000/api/audit/verify
+```
+
+**Approval survives an API restart.** The graph is compiled with
+`interrupt_before=["human_approval"]` and checkpointed to SQLite, and the
+proposal row stores its `thread_id` — so a decision can arrive in a process
+that knows nothing about the paused turn. (Static interrupts rather than
+LangGraph's dynamic `interrupt()`, because `langgraph` is pinned `<0.3`.)
+
+### Extracting facts
+
+Facts are extracted automatically while indexing. To (re-)run over
+everything already indexed:
+
+```bash
+python -c "from worker.facts import extract_all; print(extract_all())"
+```
+
+Dates are stored twice: `value` keeps the document's own wording so citations
+read naturally, `norm_value` keeps ISO-8601 so `?expiring_within=60` is pure
+SQL. **Every fact must quote its source**, and a fact whose quote is not
+literally in its chunk is discarded. Correcting a value through
+`PATCH /api/facts/{id}` sets `user_corrected`, which protects it from being
+overwritten by future re-indexing.
+
+### Current validation
+
+| Check | Result |
+|---|---|
+| `pytest -q` | **113 passed** |
+| `python scripts/smoke.py` | **24/24** |
+| `cd ui && npm test` | 15 passed |
+| `scripts/eval.py` (llama3.2 3B) | **9/10**, 10/10 grounded, ~15 s median |
+| New file → searchable | ~4 s |
+| Audit hash chain | verifies |
+
+Latency rose from ~8 s (S3) to ~15 s because the prompt now also carries the
+extracted-facts block. That buys correct answers on "which warranty has
+already expired", which previously failed.
+
+### Two known issues that affect a demo
+
+1. **The demo script's phrasing still refuses.** *"My Dell screen is
+   flickering. Am I still covered?"* returns `could not verify` — the 3B
+   model will not infer that a flickering screen falls under a hardware
+   warranty, though it cites the right documents. Use **"Is my Dell XPS 15
+   still under warranty?"** or **"When does my Dell laptop warranty
+   expire?"**, both of which answer correctly.
+2. **`ui/node_modules` is committed and is a Windows build**, so the UI will
+   not start on macOS or Linux until you `rm -rf ui/node_modules && npm
+   install`. It should be untracked — see the handover note.

@@ -48,6 +48,16 @@ def _compiled_graph(database_path: str):
         return graph
 
 
+def compiled_graph(database_path: str):
+    """Public accessor for the cached graph (used by the approvals route).
+
+    Approvals must resume the *same* compiled graph, and therefore the same
+    SqliteSaver, that the chat turn paused -- so both routes go through this
+    one cache rather than each building their own.
+    """
+    return _compiled_graph(database_path)
+
+
 def _initial_state(req: ChatRequest, conversation_id: str) -> Dict[str, Any]:
     return {
         "conversation_id": conversation_id,

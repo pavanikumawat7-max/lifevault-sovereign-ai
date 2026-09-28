@@ -56,15 +56,26 @@ export const revealDocument = (hash) =>
   request(`/api/documents/${hash}/reveal`, { method: "POST" });
 
 // --- Facts -----------------------------------------------------------------------
-export const listFacts = () => request("/api/facts");
+// S6: `type` and `expiring_within` are real query parameters now.
+export const listFacts = ({ type, expiringWithin } = {}) => {
+  const params = new URLSearchParams();
+  if (type) params.set("type", type);
+  if (expiringWithin != null) params.set("expiring_within", String(expiringWithin));
+  const query = params.toString();
+  return request(`/api/facts${query ? `?${query}` : ""}`);
+};
 export const updateFact = (id, updates) =>
   request(`/api/facts/${id}`, { method: "PATCH", body: JSON.stringify(updates) });
 
 // --- Approvals ---------------------------------------------------------------------
-export const decideApproval = (proposalId, decision, note = null) =>
+// S7: the approval queue, plus approve / edit / reject.
+export const listProposals = (status = "pending") =>
+  request(`/api/approvals?status=${encodeURIComponent(status)}`);
+
+export const decideApproval = (proposalId, decision, note = null, parameters = null) =>
   request(`/api/approvals/${proposalId}`, {
     method: "POST",
-    body: JSON.stringify({ decision, note }),
+    body: JSON.stringify({ decision, note, parameters }),
   });
 
 // --- Memory ------------------------------------------------------------------------

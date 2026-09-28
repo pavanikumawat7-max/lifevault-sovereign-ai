@@ -373,6 +373,7 @@ def verify_grounding(state: LifeVaultState) -> dict:
             history=state.get("history") or [],
             feedback=answer_module.RETRY_FEEDBACK.format(reason=report.reason or "unknown"),
             retried=True,
+            facts=state.get("retrieved_facts") or [],
         )
         update = retry.to_state()
         if is_refusal(retry.answer):

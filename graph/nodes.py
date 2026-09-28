@@ -24,6 +24,10 @@ later sessions must preserve (see graph/graph.py's routing functions):
 from __future__ import annotations
 
 from graph.answer import answer
+from graph.approval import human_approval
+from graph.audit_memory import audit_and_memory
+from graph.execute import execute
+from graph.propose import propose_action
 from graph.retrieve import retrieve
 from graph.state import LifeVaultState
 from graph.verify import verify_grounding
@@ -40,11 +44,6 @@ __all__ = [
 ]
 
 
-def propose_action(state: LifeVaultState) -> dict:
-    """S1 stub: no proposals are ever generated."""
-    return {"proposal": None}
-
-
 def policy_check(state: LifeVaultState) -> dict:
     """S1 stub: with no proposal there is nothing to evaluate, so the
     decision is None (graph/graph.py routes None the same as "deny")."""
@@ -53,28 +52,25 @@ def policy_check(state: LifeVaultState) -> dict:
     return {"policy_decision": "needs_approval"}
 
 
-def human_approval(state: LifeVaultState) -> dict:
-    """S1 stub: interrupt PLACEHOLDER only.
+def policy_check(state: LifeVaultState) -> dict:
+    """Evaluate the pending proposal against policy/policy.py (S7).
 
-    A later session should replace the body of this node with a real
-    LangGraph interrupt (e.g. `langgraph.types.interrupt(...)`) that
-    pauses execution until POST /api/approvals/{proposal_id} resumes the
-    graph with the human's decision. For S1, if there's no proposal there
-    is nothing to approve; otherwise the status is left "pending" and it
-    is the caller's job to resume the graph later.
+    Returns None (routed like "deny") when there is nothing to evaluate, so
+    the S1 routing contract in graph/graph.py is unchanged: only
+    "needs_approval" or "allow" ever reaches human_approval.
     """
-    if state.get("proposal") is None:
-        return {"approval_status": None}
-    return {"approval_status": "pending"}
+    proposal = state.get("proposal")
+    if not isinstance(proposal, dict):
+        return {"policy_decision": None}
 
+    from policy.policy import check_proposal
 
-def execute(state: LifeVaultState) -> dict:
-    """S1 stub: no tool is ever actually invoked. See tools/registry.py."""
-    return {"execution_result": None}
-
-
-def audit_and_memory(state: LifeVaultState) -> dict:
-    """S1 stub: does not write to audit_log or memory yet. A later
-    session should call api.audit.AuditLog.log(...) here and upsert a
-    `memory` row reflecting the run's outcome."""
-    return {"audit_events": list(state.get("audit_events") or [])}
+    verdict = check_proposal(
+        tool=proposal.get("tool", ""),
+        parameters=proposal.get("params") or proposal.get("parameters"),
+        evidence_document_hashes=proposal.get("evidence_document_hashes"),
+    )
+    updated = dict(proposal)
+    updated["policy"] = verdict.to_dict()
+    updated["untrusted_fields"] = verdict.untrusted_fields
+    return {"policy_decision": verdict.decision, "proposal": updated}

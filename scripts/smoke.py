@@ -29,8 +29,16 @@ except ImportError as exc:  # pragma: no cover
     )
     sys.exit(1)
 
+import tempfile
+
 os.environ.setdefault("LIFEVAULT_DB_PATH", "/tmp/lifevault_smoke.db")
 os.environ.setdefault("LIFEVAULT_USE_FIXTURES", "true")
+# S7 tools write real files. Point the vault at a throwaway directory so a
+# smoke run never leaves .ics/.eml files in the project's own vault/.
+os.environ.setdefault(
+    "LIFEVAULT_VAULT_DIR",
+    str(Path(tempfile.gettempdir()) / "lifevault_smoke_vault"),
+)
 
 from config import get_config, reset_config_cache  # noqa: E402
 
@@ -67,6 +75,39 @@ def check(client, method: str, path: str, expected_status: int = 200, json_body=
     else:
         RESULTS.append((method, path, True, ""))
     return ok
+
+
+def _seed_fact_and_proposal() -> None:
+    """Insert one fact and three pending proposals for the real S6/S7 routes."""
+    import json
+
+    from db.connect import connect
+
+    conn = connect()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO documents (content_hash, title) "
+            "VALUES ('smoke-doc-1', 'dell_warranty.pdf')"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO facts (id, type, field, value, norm_value, "
+            "source_document_hash, source_quote) VALUES (1, 'warranty', "
+            "'expiry_date', 'June 12, 2027', '2027-06-12', 'smoke-doc-1', "
+            "'Warranty expires June 12, 2027.')"
+        )
+        parameters = json.dumps(
+            {"title": "Renew warranty expires June 12, 2027",
+             "due_date": "2027-05-13"}
+        )
+        for index in (1, 2, 3):
+            conn.execute(
+                "INSERT OR REPLACE INTO proposals (id, tool, parameters, "
+                "rationale, evidence_document_hashes, status, tier) VALUES "
+                "(?, 'create_reminder', ?, 'smoke test', ?, 'pending', 'review')",
+                (f"smoke-proposal-{index}", parameters, json.dumps(["smoke-doc-1"])),
+            )
+    finally:
+        conn.close()
 
 
 def main() -> int:
@@ -129,10 +170,21 @@ def main() -> int:
     check(client, "POST", "/api/documents/smoke-doc-1/open", 200, {})
     check(client, "POST", "/api/documents/smoke-doc-1/reveal")
 
+    # S6/S7: /api/facts and /api/approvals are backed by real tables now, so
+    # a fact and a proposal have to exist before they can be patched or
+    # decided. Seeding them here keeps the smoke test end-to-end rather than
+    # asserting the old fixture behavior.
+    _seed_fact_and_proposal()
+
     check(client, "GET", "/api/facts")
+    check(client, "GET", "/api/facts?type=warranty&expiring_within=60")
     check(client, "PATCH", "/api/facts/1", 200, {"user_corrected": True})
 
-    check(client, "POST", "/api/approvals/stub-proposal-1", 200, {"decision": "approve"})
+    check(client, "GET", "/api/approvals?status=pending")
+    check(client, "POST", "/api/approvals/smoke-proposal-1", 200, {"decision": "approve"})
+    check(client, "POST", "/api/approvals/smoke-proposal-2", 200,
+          {"decision": "edit", "parameters": {"due_date": "2027-04-01"}})
+    check(client, "POST", "/api/approvals/smoke-proposal-3", 200, {"decision": "reject"})
 
     check(client, "GET", "/api/memory")
 

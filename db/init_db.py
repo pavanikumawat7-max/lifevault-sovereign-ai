@@ -32,6 +32,7 @@ def init_db(db_path: Optional[str] = None) -> None:
         schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
         conn.executescript(schema_sql)
         _apply_s2_migrations(conn)
+        _apply_s7_migrations(conn)
         _init_vector_table(conn, cfg.embedding_dimension)
     finally:
         conn.close()
@@ -46,6 +47,51 @@ def _apply_s2_migrations(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE file_locations ADD COLUMN size_bytes INTEGER")
     if "mtime_ns" not in columns:
         conn.execute("ALTER TABLE file_locations ADD COLUMN mtime_ns INTEGER")
+
+
+def _apply_s7_migrations(conn: sqlite3.Connection) -> None:
+    """Additive S7 storage: a reminders table and three proposal columns.
+
+    All additive, per the frozen-contract rule -- nothing existing is
+    renamed, dropped or retyped, and every statement is safe to re-run.
+
+    * `reminders` did not exist in the S1 schema even though the handover
+      plan says create_reminder writes a reminders row, so it is added here.
+    * `proposals.thread_id` is what makes approval survive an API restart:
+      it records which LangGraph thread to resume, so the decision can
+      arrive in a completely different process.
+    * `proposals.edit_diff` and `proposals.tier` record what a human changed
+      and how sensitive the action was, both required in the audit row.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(proposals)")}
+    for name, ddl in (
+        ("thread_id", "ALTER TABLE proposals ADD COLUMN thread_id TEXT"),
+        ("edit_diff", "ALTER TABLE proposals ADD COLUMN edit_diff TEXT"),
+        ("tier", "ALTER TABLE proposals ADD COLUMN tier TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(ddl)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reminders (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            title         TEXT NOT NULL,
+            due_date      TEXT NOT NULL,          -- ISO-8601 date
+            notes         TEXT,
+            ics_path      TEXT,                   -- .ics file written in the vault
+            proposal_id   TEXT REFERENCES proposals(id) ON DELETE SET NULL,
+            source_document_hash TEXT REFERENCES documents(content_hash) ON DELETE SET NULL,
+            created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_reminders_due_date ON reminders(due_date)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_proposals_thread_id ON proposals(thread_id)"
+    )
 
 
 def _init_vector_table(conn: sqlite3.Connection, dimension: int) -> None:
