@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { sendChatMessage } from "../api/client.js";
+import CitationList from "../components/CitationList.jsx";
+import { assistantMessageFromResponse, toRequestHistory } from "../utils/citations.js";
 
 const SUGGESTIONS = [
   "What documents have been indexed so far?",
   "Summarize the most recent document.",
-  "What can LifeVault do once retrieval is live?",
+  "Which documents mention an expiry date?",
 ];
 
 export default function Chat() {
@@ -29,9 +31,9 @@ export default function Chat() {
     setInput("");
 
     try {
-      const resp = await sendChatMessage(message, conversationId, history);
+      const resp = await sendChatMessage(message, conversationId, toRequestHistory(history));
       setConversationId(resp.conversation_id);
-      setHistory([...nextHistory, { role: "assistant", content: resp.answer }]);
+      setHistory([...nextHistory, assistantMessageFromResponse(resp)]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -52,6 +54,7 @@ export default function Chat() {
   }
 
   const userTurns = history.filter((m) => m.role === "user").length;
+  const lastModel = [...history].reverse().find((m) => m.role === "assistant" && m.model)?.model;
 
   return (
     <section className="chat-page">
@@ -59,8 +62,8 @@ export default function Chat() {
         <div>
           <h2>Chat</h2>
           <p className="hint">
-            S1 stub: answers come from <code>llm.chat()</code> in fixture mode — no retrieval,
-            grounding, or citations yet.
+            Answers are drawn from your indexed files. Sources are listed under each answer; if an
+            answer can&apos;t be verified against them, the reason is shown instead.
           </p>
         </div>
       </header>
@@ -77,8 +80,8 @@ export default function Chat() {
                 </div>
                 <p className="chat-empty-title">Ask LifeVault something</p>
                 <p className="chat-empty-subtitle">
-                  Questions are answered from the fixture LLM for now — try a quick test message
-                  or one of the prompts on the right.
+                  Answers come from your indexed files, with the sources shown under each one.
+                  Try a prompt on the right or ask your own question.
                 </p>
               </div>
             ) : (
@@ -93,6 +96,10 @@ export default function Chat() {
                         {m.role === "user" ? "You" : "LifeVault"}
                       </span>
                       <p className="chat-bubble-text">{m.content}</p>
+                      {m.role === "assistant" && !m.grounded && m.verificationReason && (
+                        <p className="chat-note">Not verified: {m.verificationReason}</p>
+                      )}
+                      {m.role === "assistant" && <CitationList citations={m.citations} />}
                     </div>
                   </div>
                 ))}
@@ -154,7 +161,7 @@ export default function Chat() {
               <div className="side-stat">
                 <dt>Status</dt>
                 <dd>
-                  <span className="pill pill--teal">Fixture mode</span>
+                  <span className="pill pill--teal">{lastModel ? `Model: ${lastModel}` : "Ready"}</span>
                 </dd>
               </div>
               <div className="side-stat">
@@ -200,11 +207,10 @@ export default function Chat() {
                   <path d="M15 3.5V8h4M9 12.5h6M9 16h6" />
                 </svg>
               </span>
-              Coming in S2
+              About sources
             </div>
             <p className="hint side-hint">
-              Real retrieval, grounded citations, and document previews land once
-              <code> graph/nodes.py</code> is implemented.
+              Each answer lists the files and pages it was drawn from, with the supporting quote.
             </p>
           </div>
         </aside>
