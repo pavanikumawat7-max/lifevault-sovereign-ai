@@ -19,19 +19,21 @@ through [Ollama](https://ollama.com).
 | Area | State | Notes |
 |---|---|---|
 | Folder consent (grant / revoke / pause) | **Real** | Revoking a folder removes only data no other approved folder still references |
-| Ingestion (scan, parse, chunk, embed, index) | **Real** | PDF only, page-aware, no OCR |
+| Ingestion (scan, parse, chunk, embed, index) | **Real** | PDFs and images, page-aware; local OCR fallback (S5) |
+| Filesystem watcher (live indexing) | **Real** | New file searchable in about 4 s (S5) |
 | Hybrid retrieval (FTS5 + sqlite-vec, RRF) | **Real** | `api/search.py` |
 | Cited answers with grounding checks | **Real** | `POST /api/chat`, no streaming |
 | Document preview, open, reveal | **Real** | `open` / `reveal` not yet verified on a real desktop |
 | Chat UI, citation chips, citation viewer | **Real** | |
 | Index status UI with pause / resume / "Index now" | **Real** | Polls every 4 seconds |
-| Hash-chained audit log and `/api/audit*` | **Real** | Nothing in the chat pipeline writes to it yet (see below) |
-| Fact extraction (`/api/facts`, Expiry page) | Stub | Returns one fixture fact |
-| Action proposals, policy, tools, human approval, execution | Stub | Graph shape is pinned; nodes are placeholders |
-| Memory (`/api/memory`) | Stub | Returns fixture data |
+| Hash-chained audit log and `/api/audit*` | **Real** | Chat turns, proposals, decisions and executions are all logged (S7) |
+| Fact extraction (`/api/facts`, Expiry page) | **Real** | Warranty/invoice/expiry facts, each with a verified source quote (S6) |
+| Action proposals, policy, tools, human approval, execution | **Real** | Two local tools; nothing runs without approval; survives restart (S7) |
+| Memory (`/api/memory`) | **Real** | Remembers last decisions as defaults, never as permissions (S7) |
 
-Stubs are intentional. The API contracts are frozen, so later sessions fill
-in behavior without changing the interfaces documented below.
+All eight graph nodes are now implemented. See [S5–S8](#s5s8-watcher-ocr-facts-actions-and-dashboards)
+below and [docs/handovers/S5-S8.md](docs/handovers/S5-S8.md). The API
+contracts are frozen; later sessions only add optional fields.
 
 ---
 
@@ -156,7 +158,7 @@ single source of truth. `.env.example` documents each one.
 | Variable | Default | Purpose |
 |---|---|---|
 | `LIFEVAULT_DB_PATH` | `data/lifevault.db` | SQLite database (created automatically) |
-| `LIFEVAULT_VAULT_DIR` | `vault` | Where action tools will be allowed to write (reserved for S7) |
+| `LIFEVAULT_VAULT_DIR` | `vault` | Where action tools write `.ics` reminders and `.eml` drafts; the only writable location |
 | `LIFEVAULT_DEMO_DATA_DIR` | `demo-data` | Sample documents |
 | `LIFEVAULT_MODEL_NAME` | `llama3.2` | Ollama chat model |
 | `LIFEVAULT_EMBEDDING_MODEL_NAME` | `nomic-embed-text` | Ollama embedding model |
@@ -182,9 +184,9 @@ If you change the API or UI ports, also update the proxy in
 | **Chat** | Ask questions. Answers show citation chips (`label: filename p.N`) and an "unverified" badge, with the reason as a tooltip, when grounding failed |
 | **Consent & Roots** | Grant or revoke folders, start indexing for a folder, and pause or resume indexing globally |
 | **Index Status** | Live state (idle, scanning, indexing, paused, error), folder counts, documents and chunks indexed, last run time |
-| **Approvals** | Placeholder; shows one fixture proposal until S7 |
-| **Audit Log** | Real entries from the hash-chained log, plus an integrity check |
-| **Expiry & Facts** | Placeholder; shows a fixture fact until fact extraction lands |
+| **Approvals** | Pending action proposals: editable parameters, evidence, tier badge, untrusted-value highlighting; Approve / Edit & approve / Reject; memory table |
+| **Audit Log** | Hash-chained entries that expand to show proposal, edit diff, policy verdict and tool output; **Verify chain** |
+| **Expiry & Facts** | Expiring-within 30/60/90/365 days with expired/active badges; every fact with its source quote, editable inline |
 
 The **citation viewer** (opened from any citation chip) previews the cited
 chunk, lists "also found at" duplicates, and offers **Open original** and
@@ -205,14 +207,14 @@ api/ (FastAPI)                                         ui/ (React + Vite)
   search.py    hybrid retrieval (FTS5 + sqlite-vec + RRF)
   routes/      one module per resource
 
-graph/ (LangGraph, 8 nodes; the first three are real)
+graph/ (LangGraph, 8 nodes; all real)
   retrieve -> answer -> verify_grounding -> propose_action -> policy_check
     -> [human_approval | audit_and_memory] -> [execute | audit_and_memory]
     -> audit_and_memory -> END
 
 worker/    scan -> parse -> chunk -> embed -> index
-tools/     tool registry interface (no tools registered yet)
-policy/    deny-by-default allow-list (no rules configured yet)
+api/tools/ create_reminder (.ics) and draft_email (.eml, never sent)
+policy/    deny-by-default allow-list, validation, vault containment, citation rule
 llm.py     local Ollama wrapper: chat / embed / structured_output, with fixture mode
 db/        schema.sql, connection helper (WAL, foreign keys), init
 config.py  single source of truth for configuration
@@ -230,7 +232,7 @@ folder the worker:
    re-hashing unchanged files; otherwise a streaming SHA-256 identifies the
    document. The same content in two places is one document with two
    locations.
-3. **Parses** PDFs page by page with PyMuPDF (no OCR).
+3. **Parses** PDFs page by page with PyMuPDF; images and near-empty PDF pages go through local OCR (RapidOCR).
 4. **Chunks** into roughly 500-token pieces with a 60-token overlap, keeping
    page number, ordinal, and source position.
 5. **Embeds** through `llm.embed` in batches of 32.
@@ -278,8 +280,8 @@ previous row's hash. Editing, reordering, or splicing any historical row
 breaks the chain from that point on, and `GET /api/audit/verify` reports the
 first offending row. The module uses only the standard library.
 
-The log and its endpoints are real and tested. Wiring the chat pipeline to
-write to it is part of `audit_and_memory`, which is still a stub.
+The log and its endpoints are real and tested, and `audit_and_memory` writes
+every chat turn, proposal, decision and execution to it.
 
 ---
 
@@ -303,10 +305,10 @@ retype an existing field.
 | GET | `/api/documents/{hash}/preview` | | `DocumentPreviewResponse` | Real |
 | POST | `/api/documents/{hash}/open` | `OpenDocumentRequest` | `OpenDocumentResponse` | Real |
 | POST | `/api/documents/{hash}/reveal` | | `RevealDocumentResponse` | Real |
-| GET | `/api/facts` | | `ListFactsResponse` | Fixture |
-| PATCH | `/api/facts/{id}` | `UpdateFactRequest` | `UpdateFactResponse` | Fixture |
-| POST | `/api/approvals/{proposal_id}` | `ApprovalDecisionRequest` | `ApprovalDecisionResponse` | Fixture |
-| GET | `/api/memory` | | `MemoryResponse` | Fixture |
+| GET | `/api/facts` | | `ListFactsResponse` | Real |
+| PATCH | `/api/facts/{id}` | `UpdateFactRequest` | `UpdateFactResponse` | Real |
+| POST | `/api/approvals/{proposal_id}` | `ApprovalDecisionRequest` | `ApprovalDecisionResponse` | Real |
+| GET | `/api/memory` | | `MemoryResponse` | Real |
 | GET | `/api/audit` | | `AuditListResponse` | Real |
 | GET | `/api/audit/verify` | | `AuditVerifyResponse` | Real |
 | GET | `/api/health` | | liveness check | Real |
@@ -405,7 +407,7 @@ tests/        one module per component, plus S2 ingestion and S3 retrieval
 demo-data/    synthetic corpus (PDFs, DOCX, one screenshot)
 docs/         eval_S3.md/.json, handovers/
 data/         SQLite database lives here (git-ignored)
-vault/        reserved for action-tool output (S7)
+vault/        action-tool output (.ics / .eml), git-ignored
 config.py, llm.py, run.py, requirements.txt, .env.example, pytest.ini
 ```
 
@@ -414,17 +416,16 @@ config.py, llm.py, run.py, requirements.txt, .env.example, pytest.ini
 `demo-data/synthetic` holds 110 files: 104 PDFs (100 filler records, a Dell
 invoice, a Dell warranty, an exact duplicate of that warranty in `folder_B`,
 and an expired refrigerator warranty), plus 5 DOCX notes and 1 screenshot.
-Indexing it yields 103 unique documents (one duplicate) and 104 chunks. The
-DOCX and screenshot files are skipped because ingestion is PDF-only. All
-content is synthetic.
+Indexing it yields 103 unique documents (one duplicate) and 104 chunks. DOCX
+files are skipped; the screenshot is indexed via OCR. All content is synthetic.
+`scripts/generate_demo_personal_docs.py` builds the personal-documents demo set
+used in [docs/demo_script.md](docs/demo_script.md).
 
 ---
 
 ## Known limitations
 
-- **PDF only.** DOCX, images, and scans are skipped; there is no OCR.
-- **Indexing is explicit.** It runs from **Index now** in the UI or from
-  `scripts/index_folder.py`. There is no filesystem watcher yet.
+- **PDFs and images only.** DOCX is skipped.
 - **The 3B model can refuse answerable questions.** Retrieval may surface and
   cite the right chunk while the model still declines, especially when the
   question needs an inference beyond the text (for example *"My screen is
@@ -438,17 +439,145 @@ content is synthetic.
 - **No streaming.** Chat returns the full answer as JSON.
 - **`open` / `reveal` are unverified on a real desktop.** The citation viewer
   always shows the path and quote, so it degrades gracefully if they fail.
-- **Facts, approvals, and memory return fixture data,** and the audit log is
-  not yet written to by the chat pipeline.
 
 ### Repository hygiene
 
-The current tree tracks files that should not be committed:
-
-- `__pycache__/` directories (already listed in `.gitignore`, but tracked).
-- `ui/node_modules/`, which is not in `.gitignore` and includes
-  Windows-only binaries (`@esbuild/win32-x64`, `@rollup/rollup-win32-*`).
-  Run `npm install` in `ui/` on your own machine regardless.
+`node_modules/`, `__pycache__/` and `vault/*` are git-ignored and untracked.
+Run `npm install` in `ui/` on your own machine.
 
 Always create your own virtualenv rather than reusing any environment from a
 clone.
+
+---
+
+## S5–S8: watcher, OCR, facts, actions and dashboards
+
+All eight sessions are now implemented — every graph node is real. See
+[docs/handovers/S5-S8.md](docs/handovers/S5-S8.md) for the full note,
+including the process caveat that these four sessions were done in one
+sitting by one person rather than by four people in rotation.
+
+### What was added
+
+| Session | Feature |
+|---|---|
+| **S5** | `watchdog` filesystem watcher (live indexing) and local OCR via RapidOCR |
+| **S6** | Fact extraction: warranty/invoice fields, ISO dates, `/api/facts` filters, facts injected into retrieval |
+| **S7** | Proposals, policy gate, human approval with interrupt/resume, two tools, execution, audit + memory |
+| **S8** | Approval card, audit viewer with edit diffs, expiry dashboard, memory table |
+
+### New dependencies (all local, no cloud)
+
+```
+watchdog>=4.0,<7.0              # S5 watcher
+rapidocr-onnxruntime>=1.3,<2.0  # S5 OCR (ONNX models, cached locally)
+dateparser>=1.2,<2.0            # S6 date normalization
+```
+
+RapidOCR downloads its models once on first use. `worker/ocr.py` degrades to
+"no OCR" if it cannot load, so nothing hard-fails without it.
+
+### `run.py` now starts three processes
+
+API + **watcher** + UI. The watcher indexes new files within seconds and can
+also be run alone:
+
+```bash
+python -m worker.watcher
+```
+
+It watches every approved, unpaused root, debounces events, waits for a
+file's size to stop changing, skips partial downloads, and never watches the
+vault (LifeVault writes `.ics`/`.eml` there — indexing its own output would
+loop). A deleted file is flagged `missing`; its document, chunks and facts
+are kept so citations degrade gracefully instead of vanishing.
+
+### OCR is a fallback, not the default
+
+A PDF page with 50+ characters of embedded text is never OCR'd — the text
+layer is more accurate and far faster. OCR runs on images and on PDF pages
+that come back nearly empty. An image yielding almost no text is stored as
+metadata only.
+
+### Actions: two tools, both local, neither destructive
+
+```
+create_reminder  -> a reminders row + an .ics file in the vault
+draft_email      -> an .eml file in the vault, NEVER sent
+```
+
+There is no delete tool and no network tool. Every action passes a policy
+gate first: a deny-by-default tool allow-list, Pydantic parameter
+validation, paths confined to the vault, and **at least one document
+citation**. Values that came from document text and look like injected
+instructions are flagged so the approval card can highlight them — flagged,
+not blocked, because a human decides.
+
+Nothing executes without approval:
+
+```bash
+# 1. ask something with an expiry date -> a reminder is proposed
+curl -s -X POST http://127.0.0.1:8000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"When does my Dell laptop warranty expire?"}'
+
+# 2. see the queue
+curl -s 'http://127.0.0.1:8000/api/approvals?status=pending'
+
+# 3. approve, or edit and approve, or reject
+curl -s -X POST http://127.0.0.1:8000/api/approvals/<id> \
+  -H 'Content-Type: application/json' \
+  -d '{"decision":"edit","parameters":{"due_date":"2027-05-01"}}'
+
+# 4. the chain records all of it
+curl -s http://127.0.0.1:8000/api/audit/verify
+```
+
+**Approval survives an API restart.** The graph is compiled with
+`interrupt_before=["human_approval"]` and checkpointed to SQLite, and the
+proposal row stores its `thread_id` — so a decision can arrive in a process
+that knows nothing about the paused turn. (Static interrupts rather than
+LangGraph's dynamic `interrupt()`, because `langgraph` is pinned `<0.3`.)
+
+### Extracting facts
+
+Facts are extracted automatically while indexing. To (re-)run over
+everything already indexed:
+
+```bash
+python -c "from worker.facts import extract_all; print(extract_all())"
+```
+
+Dates are stored twice: `value` keeps the document's own wording so citations
+read naturally, `norm_value` keeps ISO-8601 so `?expiring_within=60` is pure
+SQL. **Every fact must quote its source**, and a fact whose quote is not
+literally in its chunk is discarded. Correcting a value through
+`PATCH /api/facts/{id}` sets `user_corrected`, which protects it from being
+overwritten by future re-indexing.
+
+### Current validation
+
+| Check | Result |
+|---|---|
+| `pytest -q` | **113 passed** |
+| `python scripts/smoke.py` | **24/24** |
+| `cd ui && npm test` | 15 passed |
+| `scripts/eval.py` (llama3.2 3B) | **9/10**, 10/10 grounded, ~15 s median |
+| New file → searchable | ~4 s |
+| Audit hash chain | verifies |
+
+Latency rose from ~8 s (S3) to ~15 s because the prompt now also carries the
+extracted-facts block. That buys correct answers on "which warranty has
+already expired", which previously failed.
+
+### Two known issues that affect a demo
+
+1. **The demo script's phrasing still refuses.** *"My Dell screen is
+   flickering. Am I still covered?"* returns `could not verify` — the 3B
+   model will not infer that a flickering screen falls under a hardware
+   warranty, though it cites the right documents. Use **"Is my Dell XPS 15
+   still under warranty?"** or **"When does my Dell laptop warranty
+   expire?"**, both of which answer correctly.
+2. **`ui/node_modules` is committed and is a Windows build**, so the UI will
+   not start on macOS or Linux until you `rm -rf ui/node_modules && npm
+   install`. It should be untracked — see the handover note.

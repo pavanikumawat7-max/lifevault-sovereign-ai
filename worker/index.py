@@ -11,7 +11,7 @@ from config import get_config
 from db.connect import connect
 from db.init_db import init_db
 from worker.chunk import TextChunk, chunk_pages
-from worker.parse import parse_pdf
+from worker.parse import parse_document as parse_file, parse_pdf
 from worker.scanner import ScanBatch, scan_root
 from worker.worker import IndexResult, ParseResult, ScanResult
 
@@ -84,7 +84,7 @@ def ingest_root(root_id: int, db_path: str | None = None) -> dict:
             continue
         seen_hashes.add(document.content_hash)
         try:
-            parsed = parse_pdf(document.path, document.content_hash)
+            parsed = parse_file(document.path, document.content_hash)
             chunks = chunk_pages(parsed.pages)
             embeddings = embed_chunks(chunks)
             write_index(
@@ -96,6 +96,16 @@ def ingest_root(root_id: int, db_path: str | None = None) -> dict:
             )
             processed += 1
             chunks_indexed += len(chunks)
+            # S6: facts derive from the chunks just written, so this is the
+            # natural place to refresh them. Never fatal -- a document that
+            # yields no facts is still fully indexed and searchable.
+            try:
+                from worker.facts import extract_for_document
+
+                extract_for_document(document.content_hash, db_path)
+            except Exception as fact_exc:  # noqa: BLE001
+                print(f"[worker.index] fact extraction skipped for "
+                      f"{document.content_hash[:12]}: {fact_exc}")
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the batch
             failed += 1
             errors.append(f"{Path(document.path).name}: {exc}")
@@ -127,7 +137,7 @@ def ingest_root(root_id: int, db_path: str | None = None) -> dict:
 def parse_document(content_hash: str, db_path: str | None = None) -> ParseResult:
     """Parse and persist page-aware chunks for an existing document."""
     path = _document_path(content_hash, db_path)
-    parsed = parse_pdf(path, content_hash)
+    parsed = parse_file(path, content_hash)
     chunks = chunk_pages(parsed.pages)
     _replace_chunks(content_hash, len(parsed.pages), chunks, db_path)
     return ParseResult(content_hash=content_hash, chunks_created=len(chunks))

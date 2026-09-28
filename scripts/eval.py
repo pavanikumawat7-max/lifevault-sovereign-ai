@@ -39,7 +39,7 @@ import llm  # noqa: E402
 from config import get_config  # noqa: E402
 from graph import answer as answer_module  # noqa: E402
 from graph import verify as verify_module  # noqa: E402
-from graph.retrieve import retrieve_chunks  # noqa: E402
+from graph.retrieve import retrieve_chunks, retrieve_facts  # noqa: E402
 
 #: Expected answers and sources come from demo-data/synthetic, which is
 #: generated deterministically by scripts/generate_demo_corpus.py.
@@ -72,7 +72,10 @@ QUESTIONS: List[Dict[str, Any]] = [
         "id": 5,
         "question": "On what date was the Dell XPS 15 purchased?",
         "expect_contains": [["June 12, 2026", "2026-06-12"]],
-        "expect_file": "dell_warranty.pdf",
+        # This date is stated by both documents ("Purchase date: June 12,
+        # 2026" in the warranty, "Invoice date June 12, 2026" in the
+        # invoice), so citing either is correct.
+        "expect_file": ["dell_warranty.pdf", "dell_invoice.pdf"],
     },
     {
         "id": 6,
@@ -109,6 +112,13 @@ QUESTIONS: List[Dict[str, Any]] = [
 ]
 
 
+def _describe_expected_file(expected: Any) -> str:
+    if not expected:
+        return "(none)"
+    names = expected if isinstance(expected, (list, tuple)) else [expected]
+    return " or ".join(f"`{name}`" for name in names)
+
+
 def _answer_contains(answer_text: str, expected: Any) -> bool:
     """Is `expected` present in the answer?
 
@@ -134,12 +144,17 @@ def run_question(item: Dict[str, Any], model: Optional[str]) -> Dict[str, Any]:
     started = time.perf_counter()
 
     chunks = retrieve_chunks(question)
+    # S6: the retrieve node also injects fact rows for date/money questions,
+    # so the eval must too -- otherwise it measures a prompt that production
+    # never actually sends.
+    facts = retrieve_facts(question)
     retrieval_ms = int((time.perf_counter() - started) * 1000)
 
-    draft = answer_module.generate_answer(question, chunks, model=model)
+    draft = answer_module.generate_answer(question, chunks, model=model, facts=facts)
     state: Dict[str, Any] = {
         "user_message": question,
         "retrieved_chunks": chunks,
+        "retrieved_facts": facts,
         "history": [],
         **draft.to_state(),
     }
@@ -152,7 +167,13 @@ def run_question(item: Dict[str, Any], model: Optional[str]) -> Dict[str, Any]:
     refused = verify_module.is_refusal(answer_text)
 
     expected_file = item.get("expect_file")
-    cited_expected = bool(expected_file) and expected_file in cited_files
+    # `expect_file` may be a list when more than one document legitimately
+    # states the answer; citing any of them counts.
+    acceptable = (
+        expected_file if isinstance(expected_file, (list, tuple))
+        else ([expected_file] if expected_file else [])
+    )
+    cited_expected = bool(acceptable) and any(name in cited_files for name in acceptable)
     missing = [
         _describe_expected(expected)
         for expected in item.get("expect_contains", [])
@@ -245,7 +266,7 @@ def render_markdown(results: List[Dict[str, Any]], meta: Dict[str, Any]) -> str:
                 grounded="yes" if result["grounded"] else "no",
                 labels=labels,
                 sources=sources,
-                expected=f"`{result['expect_file']}`" if result["expect_file"] else "(none)",
+                expected=_describe_expected_file(result["expect_file"]),
                 passed="PASS" if result["pass"] else "FAIL",
                 latency=result["latency_ms"] / 1000,
             )

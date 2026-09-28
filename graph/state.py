@@ -23,6 +23,8 @@ class LifeVaultState(TypedDict, total=False):
 
     # retrieve
     retrieved_chunks: List[Dict[str, Any]]
+    #: S6 addition: structured fact rows relevant to a date/expiry question.
+    retrieved_facts: List[Dict[str, Any]]
 
     # answer
     answer_text: str
@@ -47,6 +49,9 @@ class LifeVaultState(TypedDict, total=False):
 
     # propose_action
     proposal: Optional[Dict[str, Any]]
+    #: S7 addition: other proposals considered but not put up for approval
+    #: (including any that policy rejected, so denials stay visible).
+    proposal_candidates: List[Dict[str, Any]]
 
     # policy_check
     policy_decision: Optional[PolicyDecision]

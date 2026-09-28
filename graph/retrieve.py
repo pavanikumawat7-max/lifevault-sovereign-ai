@@ -25,6 +25,26 @@ def retrieve_chunks(
     return [chunk.to_dict() for chunk in hybrid_search(query, top_k=top_k, db_path=db_path)]
 
 
+def retrieve_facts(query: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """S6 addition: structured fact rows relevant to a date/expiry question.
+
+    Why this exists: the handover plan's mitigation for a slow, small local
+    model is "facts and dates from SQL". A 3B model asked to reason about
+    whether a warranty is still valid is slow and unreliable; handed a row
+    that already says `expiry_date = 2027-06-12`, it only has to read.
+
+    Returns [] for questions that are not about time or money, so ordinary
+    questions keep the retrieved chunks undiluted. Never raises: facts are
+    an enhancement to retrieval, never a dependency of it.
+    """
+    try:
+        from worker.facts import facts_for_question
+
+        return facts_for_question(query, db_path=db_path)
+    except Exception:  # noqa: BLE001 - deliberate, documented degradation
+        return []
+
+
 def retrieve(state: LifeVaultState) -> dict:
     """The `retrieve` node: hybrid search over the indexed corpus.
 
@@ -42,4 +62,8 @@ def retrieve(state: LifeVaultState) -> dict:
             "execution_result": None,
             "error": f"retrieval failed: {exc}",
         }
-    return {"retrieved_chunks": chunks, "execution_result": None}
+    return {
+        "retrieved_chunks": chunks,
+        "retrieved_facts": retrieve_facts(query),
+        "execution_result": None,
+    }

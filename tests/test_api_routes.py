@@ -177,11 +177,31 @@ def test_documents_endpoints_for_indexed_document(tmp_db_path, monkeypatch):
 
 
 def test_facts_list_and_patch(tmp_db_path, monkeypatch):
+    """S6 made /api/facts real, so a fact has to exist to be listed.
+
+    An empty facts table now correctly returns an empty list instead of the
+    S1 fixture, which is what this test used to rely on.
+    """
     client = _client(tmp_db_path, monkeypatch)
-    resp = client.get("/api/facts")
-    assert resp.status_code == 200
-    facts = resp.json()["facts"]
-    assert len(facts) >= 1
+
+    assert client.get("/api/facts").json()["facts"] == []
+
+    from db.connect import connect
+
+    conn = connect(tmp_db_path)
+    try:
+        conn.execute(
+            "INSERT INTO facts (type, field, value, norm_value, source_quote) "
+            "VALUES ('warranty', 'expiry_date', 'June 12, 2027', '2027-06-12', "
+            "'Warranty expires June 12, 2027.')"
+        )
+    finally:
+        conn.close()
+
+    facts = client.get("/api/facts").json()["facts"]
+    assert len(facts) == 1
+    assert facts[0]["norm_value"] == "2027-06-12"
+    assert facts[0]["label"] == "Expiry Date"
 
     fact_id = facts[0]["id"]
     resp2 = client.patch(f"/api/facts/{fact_id}", json={"user_corrected": True})
@@ -189,11 +209,47 @@ def test_facts_list_and_patch(tmp_db_path, monkeypatch):
     assert resp2.json()["fact"]["user_corrected"] is True
 
 
-def test_approvals_decision(tmp_db_path, monkeypatch):
+def test_approvals_decision(tmp_db_path, monkeypatch, tmp_path):
+    """S7 made this route real, so a proposal has to exist to be decided.
+
+    Deciding an unknown id is now a 404 instead of mutating a fixture, which
+    is what this test used to rely on.
+    """
+    monkeypatch.setenv("LIFEVAULT_VAULT_DIR", str(tmp_path / "vault"))
     client = _client(tmp_db_path, monkeypatch)
-    resp = client.post("/api/approvals/stub-proposal-1", json={"decision": "approve"})
-    assert resp.status_code == 200
-    assert resp.json()["proposal"]["status"] == "approved"
+
+    assert client.post(
+        "/api/approvals/stub-proposal-1", json={"decision": "approve"}
+    ).status_code == 404
+
+    from db.connect import connect
+
+    conn = connect(tmp_db_path)
+    try:
+        conn.execute(
+            "INSERT INTO documents (content_hash, title) VALUES ('h1', 'w.pdf')"
+        )
+        conn.execute(
+            "INSERT INTO proposals (id, tool, parameters, rationale, "
+            "evidence_document_hashes, status, tier) VALUES "
+            "('p1', 'create_reminder', "
+            "'{\"title\": \"Renew warranty\", \"due_date\": \"2027-05-13\"}', "
+            "'because it expires', '[\"h1\"]', 'pending', 'review')"
+        )
+    finally:
+        conn.close()
+
+    resp = client.post("/api/approvals/p1", json={"decision": "approve"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["proposal"]["status"] == "executed"
+    assert body["executed"] is True
+    assert body["result"]["output"]["ics_path"].endswith(".ics")
+
+    # Deciding it twice is a conflict, not a second execution.
+    assert client.post(
+        "/api/approvals/p1", json={"decision": "approve"}
+    ).status_code == 409
 
 
 def test_memory_list(tmp_db_path, monkeypatch):

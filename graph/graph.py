@@ -72,10 +72,27 @@ def _default_checkpointer():
         return MemorySaver()
 
 
-def build_graph(checkpointer: Optional[object] = None):
+def build_graph(
+    checkpointer: Optional[object] = None,
+    interrupt_for_approval: bool = True,
+):
     """Build and compile the LifeVault graph. Pass a checkpointer (e.g.
     `MemorySaver()`) explicitly in tests for a fast, dependency-free run;
-    otherwise a SQLite-backed one is used when available."""
+    otherwise a SQLite-backed one is used when available.
+
+    `interrupt_for_approval` (S7) compiles the graph with
+    `interrupt_before=["human_approval"]`, which is what makes the approval
+    gate real: a run that produces a proposal stops before that node and
+    waits. Resume by writing the decision into the thread's state and
+    invoking with `None` -- see graph/approval.py for the full sequence and
+    why static interrupts are used instead of the dynamic `interrupt()`
+    (LangGraph is pinned `<0.3`, where that function does not yet exist).
+
+    Note this changes nothing for a turn with no proposal: routing sends
+    those from policy_check straight to audit_and_memory, so `human_approval`
+    is never entered and no pause happens. Pass False to compile a
+    non-pausing graph for tests that want a single uninterrupted run.
+    """
     graph = StateGraph(LifeVaultState)
 
     graph.add_node("retrieve", nodes.retrieve)
@@ -110,4 +127,7 @@ def build_graph(checkpointer: Optional[object] = None):
     if checkpointer is None:
         checkpointer = _default_checkpointer()
 
-    return graph.compile(checkpointer=checkpointer)
+    compile_kwargs = {"checkpointer": checkpointer}
+    if interrupt_for_approval:
+        compile_kwargs["interrupt_before"] = ["human_approval"]
+    return graph.compile(**compile_kwargs)

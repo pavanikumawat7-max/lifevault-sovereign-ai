@@ -69,20 +69,28 @@ def start_ui() -> Optional[subprocess.Popen]:
     return subprocess.Popen(["npm", "run", "dev"], cwd=str(ui_dir))
 
 
-def note_worker_status() -> None:
-    print(
-        "[run.py] Worker: S1 interface stub only (worker/worker.py) -- no "
-        "background scan/parse/index process to start yet."
+def start_watcher() -> Optional[subprocess.Popen]:
+    """Start the S5 filesystem watcher as a third process.
+
+    Kept as a subprocess rather than a thread so Ctrl+C tears it down the
+    same way as the API and the UI, and so a watcher crash cannot take the
+    API with it. It is optional: if `watchdog` is missing the watcher exits
+    non-zero on its own and everything else keeps working, just without live
+    indexing.
+    """
+    print("[run.py] Starting filesystem watcher (worker.watcher) ...")
+    return subprocess.Popen(
+        [sys.executable, "-m", "worker.watcher"], cwd=str(ROOT)
     )
 
 
 def main() -> None:
     ensure_db()
-    note_worker_status()
 
     api_proc = start_api()
+    watcher_proc = start_watcher()
     ui_proc = start_ui()
-    procs = [p for p in (api_proc, ui_proc) if p is not None]
+    procs = [p for p in (api_proc, watcher_proc, ui_proc) if p is not None]
 
     def shutdown(signum, frame) -> None:  # noqa: ANN001, ARG001
         print("\n[run.py] Shutting down...")

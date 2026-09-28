@@ -23,7 +23,10 @@ EXECUTABLE_SUFFIXES = {
     ".app", ".bat", ".bin", ".cmd", ".com", ".dll", ".dmg", ".exe", ".msi",
     ".scr", ".sh", ".so"
 }
-SUPPORTED_SUFFIXES = {".pdf"}
+# S5 addition: images are supported now that OCR exists. DOCX stays out --
+# it needs a different extractor, not OCR, and is on the plan's cut list.
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+SUPPORTED_SUFFIXES = {".pdf"} | IMAGE_SUFFIXES
 SKIP_DIR_NAMES = {".git", "node_modules"}
 
 
